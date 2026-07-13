@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Asymmetric demand focused on the center intersection B1 (Phase 3).
+
+     Two flows merge onto B1's west approach (A1B1): a straight east-west
+     stream and a turning stream fed via A0/A1. Together they demand
+     ~550 veh/h from that single approach, above the ~375 veh/h a fixed
+     30s-green-in-144s-cycle phase can discharge (saturation ~1800 veh/h
+     x 30/144), while the other three approaches stay light. Each feeder
+     stays below its upstream fixed signal's per-approach capacity, and the
+     merged stream splits again downstream of B1, so B1 itself is the only
+     bottleneck - exactly the situation adaptive green allocation targets.
+-->
+<routes>
+    <flow id="ew_through" begin="0" end="3600" vehsPerHour="300" departSpeed="max">
+        <route edges="left1A1 A1B1 B1C1 C1right1"/>
+    </flow>
+    <flow id="sw_turning" begin="0" end="3600" vehsPerHour="250" departSpeed="max">
+        <route edges="bottom0A0 A0A1 A1B1 B1B2 B2top1"/>
+    </flow>
+    <flow id="ns_cross" begin="0" end="3600" vehsPerHour="80" departSpeed="max">
+        <route edges="bottom1B0 B0B1 B1B2 B2top1"/>
+    </flow>
+    <flow id="sn_cross" begin="0" end="3600" vehsPerHour="80" departSpeed="max">
+        <route edges="top1B2 B2B1 B1B0 B0bottom1"/>
+    </flow>
+    <flow id="we_reverse" begin="0" end="3600" vehsPerHour="100" departSpeed="max">
+        <route edges="right1C1 C1B1 B1A1 A1left1"/>
+    </flow>
+</routes>

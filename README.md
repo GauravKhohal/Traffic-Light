@@ -15,7 +15,13 @@ each new phase.
       [detection/README.md](detection/README.md). Validated so far only on a
       bundled sample image — full video/tracking/queue-length/ROI-calibration
       needs real intersection footage, not available in this environment yet.
-- [ ] Phase 3 — Single-intersection rule-based adaptive control
+- [x] **Phase 3 — Single-intersection rule-based adaptive control**: center
+      intersection (B1) driven adaptively via TraCI — demand-proportional
+      green allocation (15–60s), 90–180s cycles, 120s max-red fairness cap,
+      fixed-time fallback on detection failure. Beats fixed timing where it
+      matters (directional overload: +14% throughput, −11% network wait);
+      slightly worse under symmetric demand until Phase 4 adds coordination.
+      See `simulation/results/phase3_report.md`.
 - [ ] Phase 4 — Multi-signal MQTT coordination + green-wave behavior
 - [ ] Phase 5 — RL optimization (DQN/PPO via Stable-Baselines3)
 - [ ] Phase 6 — Dashboard (React) + edge deployment packaging
@@ -24,6 +30,6 @@ each new phase.
 
 ```
 ai-traffic-signal-project.md   Original spec (master prompt, tech stack, roadmap)
-simulation/                    Phase 1: SUMO network, demand, baseline runner, report
+simulation/                    Phases 1+3: SUMO network, demand, baseline + adaptive controller, reports
 detection/                     Phase 2: YOLOv8 vehicle detection, tracking, queue estimation
 ```

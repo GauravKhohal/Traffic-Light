@@ -1,0 +1,9 @@
+scenario,mode,b1_avg_stop_s,b1_avg_queue_veh,b1_max_queue_veh,b1_served_veh,b1_max_red_s,net_avg_wait_s,net_completed_veh
+low,fixed,27.27,3.29,11,434,110.0,111.48,1133
+low,adaptive,31.43,3.78,13,433,110.0,117.54,1133
+medium,fixed,36.51,8.95,22,883,110.0,141.28,2243
+medium,adaptive,45.13,11.02,26,879,110.0,146.38,2239
+rush,fixed,1037.39,75.21,98,261,110.0,553.6,547
+rush,adaptive,1366.5,82.37,99,217,116.0,543.27,508
+asymmetric,fixed,66.13,10.84,24,590,110.0,300.58,567
+asymmetric,adaptive,70.03,13.09,25,673,110.0,266.79,652
