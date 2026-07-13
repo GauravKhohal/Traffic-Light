@@ -1,0 +1,7 @@
+eclipse-sumo==1.27.1
+traci==1.27.1
+sumolib==1.27.1
+pandas>=2.2
+numpy>=1.26
+lxml>=5.0
+tabulate>=0.9

@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+simulation/outputs/
+simulation/network/grid3x3_raw.net.xml
+simulation/demand/*.trips.xml

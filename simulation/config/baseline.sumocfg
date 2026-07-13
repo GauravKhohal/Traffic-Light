@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+Manual/GUI config for the fixed-time baseline. For automated batch runs
+across all three demand scenarios (with metrics output), use
+scripts/run_baseline.py instead. To try a different scenario here, change
+route-files to low.rou.xml / medium.rou.xml / rush.rou.xml.
+-->
+<configuration>
+    <input>
+        <net-file value="../network/grid3x3.net.xml"/>
+        <route-files value="../demand/medium.rou.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+    </time>
+</configuration>
