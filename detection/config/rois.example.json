@@ -1,0 +1,25 @@
+{
+  "_comment": "Example ROI config for a single intersection with 4 approaches. Coordinates are pixel [x, y] in the camera frame, polygon points listed in order (clockwise or counter-clockwise) tracing the approach lane(s). 'queue_zone' is a smaller polygon near the stop line used for queue-length estimation; omit it (or set to null) if not calibrated. These placeholder coordinates assume a 1280x720 frame and MUST be recalibrated for real footage -- use scripts/calibrate_rois.py.",
+  "routes": [
+    {
+      "name": "route_1_north",
+      "polygon": [[560, 0], [720, 0], [700, 260], [580, 260]],
+      "queue_zone": [[560, 180], [720, 180], [700, 260], [580, 260]]
+    },
+    {
+      "name": "route_2_east",
+      "polygon": [[1000, 260], [1280, 280], [1280, 420], [1000, 400]],
+      "queue_zone": [[1000, 260], [1120, 270], [1120, 410], [1000, 400]]
+    },
+    {
+      "name": "route_3_south",
+      "polygon": [[580, 460], [700, 460], [720, 720], [560, 720]],
+      "queue_zone": [[580, 460], [700, 460], [700, 540], [580, 540]]
+    },
+    {
+      "name": "route_4_west",
+      "polygon": [[0, 280], [280, 260], [280, 400], [0, 420]],
+      "queue_zone": [[160, 270], [280, 260], [280, 400], [160, 400]]
+    }
+  ]
+}
