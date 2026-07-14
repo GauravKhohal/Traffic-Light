@@ -100,6 +100,7 @@ class MqttFeed:
         import paho.mqtt.client as mqtt
 
         self.store = store
+        self._last_metric_t = None
         self._client = mqtt.Client(
             callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id="tl-dashboard"
         )
@@ -113,19 +114,30 @@ class MqttFeed:
             p = json.loads(msg.payload.decode())
             queues = p.get("queues", [])
             idx = int(p.get("phase", -1))
+            kind = p.get("phase_kind")  # enriched publisher sends green/yellow/allred
+            if kind == "yellow":
+                phase = "yellow"
+            elif kind == "allred":
+                phase = "allred"
+            else:
+                phase = APPROACH_LABELS[idx] if 0 <= idx < 4 else "—"
             self.store.update_signal(
                 {
                     "id": p["id"],
                     "queues": {
                         APPROACH_LABELS[i]: queues[i] for i in range(min(4, len(queues)))
                     },
-                    "phase": APPROACH_LABELS[idx] if 0 <= idx < 4 else "—",
+                    "phase": phase,
                     "phase_index": idx,
-                    "countdown": None,
+                    "countdown": p.get("countdown"),  # None if not provided
                 }
             )
-            total = sum(sum(s["queues"].values()) for s in self.store.signals())
-            self.store.record_metrics(avg_wait=total * 2.5, total_queue=total)
+            # record one history point per simulation second, not per message
+            t = p.get("t")
+            if t != self._last_metric_t:
+                self._last_metric_t = t
+                total = sum(sum(s["queues"].values()) for s in self.store.signals())
+                self.store.record_metrics(avg_wait=total * 2.5, total_queue=total)
         except (ValueError, KeyError):
             pass
 
