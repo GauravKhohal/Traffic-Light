@@ -170,3 +170,41 @@ platoons cleared at one signal catch a fresh red at the next — which sharing
 outflow fixes. Coordinated also clears +33% more eastbound vehicles than
 fixed timing, which can't discharge the 500 veh/h corridor demand. The 120s
 max-red cap held and no fallback cycles occurred.
+
+## Phase 5 — RL (DQN) optimization at B1
+
+`rl/` trains a Deep Q-Network to control B1, for a three-way comparison
+against fixed timing and the Phase 3 rule-based controller. Per the spec:
+state = per-route queues + approaching vehicles + current phase + time in
+phase; action = extend the current green or switch to the next approach;
+reward = the drop in total waiting time since the last decision. Safety is
+enforced by the environment (`rl/sumo_env.py`, a Gymnasium env): every switch
+runs the fixed 4s yellow + 2s all-red, with a 10s min / 60s max green. The
+env uses `libsumo` in-process for fast training and falls back to `traci`.
+
+```
+.venv\Scripts\python simulation\rl\test_env.py        # env smoke test (no training)
+.venv\Scripts\python simulation\rl\train.py --scenario asymmetric --timesteps 50000
+.venv\Scripts\python simulation\rl\evaluate.py        # fixed vs rule vs RL, all scenarios
+```
+
+`train.py` saves one agent per scenario to `rl/models/` (gitignored).
+`evaluate.py` runs all three strategies over a full hour through the same
+B1-local metrics harness as Phase 3, writing `results/phase5_report.md`. The
+observation and route derivation are shared (`sumo_env.build_observation`) by
+the training env and the eval-time `rl/rl_controller.py`, so the agent is
+measured under the same dynamics it trained on.
+
+## Phase 5 results
+
+Full table and interpretation in `results/phase5_report.md`. On the
+`asymmetric` scenario the DQN agent cuts B1 stopped time ~58% and network
+wait ~48% vs fixed and clears the most vehicles — beating the rule-based
+controller decisively; it also edges out fixed on `low`. On symmetric
+`medium` demand it stays worse than fixed even after 120k steps (single-signal
+adaptivity doesn't help balanced traffic, matching the Phase 3 finding), and
+`rush` is over capacity for any single-junction policy. Honest caveat: the RL
+env doesn't enforce the 120s max-red cap, so the agent gets part of its delay
+win by starving a light approach (max red ~199s on `asymmetric`) — a real
+fairness tradeoff the rule-based controller avoids. Training is a modest CPU
+budget; results are high-variance across scenarios.

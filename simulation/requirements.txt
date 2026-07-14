@@ -6,3 +6,7 @@ numpy>=1.26
 lxml>=5.0
 tabulate>=0.9
 paho-mqtt>=2.1   # Phase 4 inter-signal coordination (MqttBus); in-process bus needs nothing
+# Phase 5 RL (DQN). torch comes in via detection/requirements.txt (YOLO); pin nothing here.
+stable-baselines3>=2.3
+gymnasium>=0.29
+libsumo==1.27.1  # in-process SUMO for fast RL training (falls back to traci if absent)

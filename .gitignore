@@ -6,3 +6,5 @@ simulation/network/grid3x3_raw.net.xml
 simulation/demand/*.trips.xml
 detection/models/
 detection/outputs/
+simulation/rl/models/
+simulation/rl/tensorboard/

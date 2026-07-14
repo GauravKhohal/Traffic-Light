@@ -30,13 +30,20 @@ each new phase.
       against a Mosquitto broker). On a heavy corridor, coordination cuts
       eastbound travel time −27% and stops −32% vs uncoordinated adaptive.
       See `simulation/results/phase4_report.md`.
-- [ ] Phase 5 — RL optimization (DQN/PPO via Stable-Baselines3)
+- [x] **Phase 5 — RL optimization (DQN via Stable-Baselines3)**: a Gymnasium
+      SUMO env (extend/switch action, queue+incoming+phase state, waiting-time
+      reward, env-enforced yellow/all-red safety) trains a DQN per scenario to
+      control B1, compared against fixed and the rule-based controller. On
+      directional (`asymmetric`) demand RL cuts B1 stopped time ~58% and
+      network wait ~48% vs fixed, beating the rule-based controller; it's
+      weaker on balanced demand and trades away the strict 120s fairness cap.
+      See `simulation/results/phase5_report.md`.
 - [ ] Phase 6 — Dashboard (React) + edge deployment packaging
 
 ## Layout
 
 ```
 ai-traffic-signal-project.md   Original spec (master prompt, tech stack, roadmap)
-simulation/                    Phases 1+3+4: SUMO network, demand, baseline + adaptive + coordinated controllers, reports
+simulation/                    Phases 1+3+4+5: SUMO network, demand, baseline + adaptive + coordinated + RL controllers, reports
 detection/                     Phase 2: YOLOv8 vehicle detection, tracking, queue estimation
 ```
