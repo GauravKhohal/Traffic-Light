@@ -111,3 +111,62 @@ B1's eight fixed neighbors all share identical 144s programs, so a fixed B1
 is accidentally coordinated with them; Phase 4's inter-signal coordination
 is the remedy. `rush` is over network capacity and gridlocks in both modes.
 The 120s max-red fairness cap held in every run.
+
+## Phase 4 — inter-signal coordination and green wave
+
+Adds messaging between signals so each predicts incoming platoons and
+pre-extends the corridor green. Every 5s a signal publishes
+`{id, queues, phase, outflow}` — `outflow` being veh/min heading toward each
+neighbour, measured on its outgoing edges. A downstream signal reads its
+upstream neighbours' outflow *toward itself* and predicts arrivals over the
+next horizon (`predict_incoming`), feeding the spec's `incoming_i` term into
+the same Phase 3 allocation. A heavy upstream platoon raises `incoming_i` on
+the corridor approach, so its green grows before the queue forms — the green
+wave emerges from the demand formula, no separate offset logic.
+
+`coordination/` holds the transport-agnostic pieces: `topology.py` (each
+signal's neighbours, connecting edges, and free-flow travel times from the
+net), `predictor.py` (the pure outflow→arrivals prediction), and
+`transport.py` with two interchangeable buses — `InProcessBus` (deterministic,
+used for metric runs) and `MqttBus` (paho, QoS 1, retained; the real
+edge-deployment path). `controller/coordinated.py` subclasses the Phase 3
+controller, adding outflow measurement, publishing, and the prediction hook.
+
+```
+.venv\Scripts\python simulation\coordination\test_coordination.py  # unit tests
+.venv\Scripts\python simulation\scripts\run_coordinated.py         # fixed/independent/coordinated
+.venv\Scripts\python simulation\scripts\report_phase4.py           # corridor comparison
+```
+
+`run_coordinated.py` runs the corridor scenario (`demand/corridor.rou.xml`:
+heavy eastbound flow along row 1 A1→B1→C1 with cross traffic) under three
+strategies — all-fixed, the three corridor signals adaptive-but-independent,
+and adaptive-and-coordinated — writing to `outputs/phase4/`. `independent`
+and `coordinated` share one controller with messaging toggled off/on, so the
+difference is purely the coordination term.
+
+### MQTT
+
+The coordination messages run over real MQTT for edge deployment. Start a
+broker (Docker) and validate the path:
+
+```
+docker run -d --rm --name tl-mosquitto -p 1883:1883 eclipse-mosquitto:2 \
+  sh -c "printf 'listener 1883\nallow_anonymous true\n' > /m.conf && exec mosquitto -c /m.conf"
+.venv\Scripts\python simulation\scripts\mqtt_smoke.py                        # QoS-1 round-trip + retained
+.venv\Scripts\python simulation\scripts\run_coordinated.py --modes coordinated --transport mqtt
+```
+
+The metric runs use `InProcessBus` for reproducibility; `--transport mqtt`
+proves the identical controller runs over a live broker.
+
+## Phase 4 results
+
+Full table and interpretation in `results/phase4_report.md`. Isolating the
+coordination term (coordinated vs independent, same controller): eastbound
+corridor travel time −27%, stops per vehicle −32%, network wait −11%.
+Independent adaptation alone is actually *worse* than fixed on stops —
+platoons cleared at one signal catch a fresh red at the next — which sharing
+outflow fixes. Coordinated also clears +33% more eastbound vehicles than
+fixed timing, which can't discharge the 500 veh/h corridor demand. The 120s
+max-red cap held and no fallback cycles occurred.

@@ -140,6 +140,12 @@ class AdaptiveIntersectionController:
         self._queue_steps = 0
         self._detection_ok = True
 
+    def _compute_incoming(self):
+        """Predicted arrivals per route from upstream signals. None here (no
+        coordination); Phase 4's CoordinatedIntersectionController overrides
+        this to return a per-route count from neighbours' published outflow."""
+        return None
+
     # -- cycle planning ----------------------------------------------------
     def _plan_cycle(self):
         """Allocate the next cycle's greens from each route's queue averaged
@@ -150,7 +156,7 @@ class AdaptiveIntersectionController:
         the fixed 30s schedule for the next cycle."""
         if self._detection_ok and self._queue_steps > 0:
             queues = [s / self._queue_steps for s in self._queue_sums]
-            self.greens = allocate_green_times(queues)
+            self.greens = allocate_green_times(queues, incoming=self._compute_incoming())
         else:
             self.greens = [GREEN_BASE_S] * self.n
             self.fallback_cycles += 1

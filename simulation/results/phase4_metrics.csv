@@ -1,0 +1,4 @@
+mode,corridor_veh,eb_travel_s,eb_timeloss_s,eb_stops,net_avg_wait_s,net_completed,fallback_cycles,max_red_s
+fixed,349,396.95,339.38,3.01,186.6,1258,0,0.0
+independent,445,382.6,324.92,4.89,179.15,1358,0,114.0
+coordinated,463,278.74,220.95,3.34,159.66,1368,0,114.0

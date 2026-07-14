@@ -22,7 +22,14 @@ each new phase.
       matters (directional overload: +14% throughput, −11% network wait);
       slightly worse under symmetric demand until Phase 4 adds coordination.
       See `simulation/results/phase3_report.md`.
-- [ ] Phase 4 — Multi-signal MQTT coordination + green-wave behavior
+- [x] **Phase 4 — Multi-signal MQTT coordination + green-wave behavior**:
+      signals publish per-route queues + outflow every 5s and predict incoming
+      platoons from upstream neighbours, folding it into the demand term so the
+      corridor green pre-extends (green wave). Transport-agnostic over an
+      in-process bus (deterministic metric runs) or real MQTT/QoS-1 (validated
+      against a Mosquitto broker). On a heavy corridor, coordination cuts
+      eastbound travel time −27% and stops −32% vs uncoordinated adaptive.
+      See `simulation/results/phase4_report.md`.
 - [ ] Phase 5 — RL optimization (DQN/PPO via Stable-Baselines3)
 - [ ] Phase 6 — Dashboard (React) + edge deployment packaging
 
@@ -30,6 +37,6 @@ each new phase.
 
 ```
 ai-traffic-signal-project.md   Original spec (master prompt, tech stack, roadmap)
-simulation/                    Phases 1+3: SUMO network, demand, baseline + adaptive controller, reports
+simulation/                    Phases 1+3+4: SUMO network, demand, baseline + adaptive + coordinated controllers, reports
 detection/                     Phase 2: YOLOv8 vehicle detection, tracking, queue estimation
 ```

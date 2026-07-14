@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Corridor demand for the Phase 4 green-wave experiment (row 1: A1-B1-C1).
+
+     A heavy eastbound stream runs the length of row 1 (left1 -> right1),
+     shaped into platoons by A1's signal, with lighter reverse flow and
+     moderate north-south cross traffic at each of the three corridor
+     signals. Eastbound demand (500 veh/h) exceeds what a fixed 30s-of-144s
+     phase can discharge (~375 veh/h), so fixed timing queues on the
+     corridor; adaptive timing clears it; coordination adds a green wave so
+     the eastbound platoons meet green at B1 and C1 and stop less often.
+
+     Vehicle ids are prefixed by flow id (cor_eb.*, cor_wb.*, x*.*), so the
+     report can isolate the eastbound corridor vehicles. -->
+<routes>
+    <!-- corridor, west -> east (the green-wave direction) -->
+    <flow id="cor_eb" begin="0" end="3600" vehsPerHour="500" departSpeed="max">
+        <route edges="left1A1 A1B1 B1C1 C1right1"/>
+    </flow>
+    <!-- corridor, east -> west -->
+    <flow id="cor_wb" begin="0" end="3600" vehsPerHour="250" departSpeed="max">
+        <route edges="right1C1 C1B1 B1A1 A1left1"/>
+    </flow>
+
+    <!-- north-south cross traffic through A1 -->
+    <flow id="xa_sn" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="bottom0A0 A0A1 A1A2 A2top0"/>
+    </flow>
+    <flow id="xa_ns" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="top0A2 A2A1 A1A0 A0bottom0"/>
+    </flow>
+
+    <!-- north-south cross traffic through B1 -->
+    <flow id="xb_sn" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="bottom1B0 B0B1 B1B2 B2top1"/>
+    </flow>
+    <flow id="xb_ns" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="top1B2 B2B1 B1B0 B0bottom1"/>
+    </flow>
+
+    <!-- north-south cross traffic through C1 -->
+    <flow id="xc_sn" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="bottom2C0 C0C1 C1C2 C2top2"/>
+    </flow>
+    <flow id="xc_ns" begin="0" end="3600" vehsPerHour="120" departSpeed="max">
+        <route edges="top2C2 C2C1 C1C0 C0bottom2"/>
+    </flow>
+</routes>
