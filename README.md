@@ -38,7 +38,14 @@ each new phase.
       network wait ~48% vs fixed, beating the rule-based controller; it's
       weaker on balanced demand and trades away the strict 120s fairness cap.
       See `simulation/results/phase5_report.md`.
-- [ ] Phase 6 — Dashboard (React) + edge deployment packaging
+- [x] **Phase 6 — Dashboard + backend + deployment packaging**: a FastAPI
+      backend aggregates live signal state (from the Phase 4 MQTT stream, or a
+      built-in synthetic demo feed) and streams it over a WebSocket to a React
+      + Tailwind + Recharts dashboard — grid map coloured by congestion,
+      per-signal phase/countdown/queues, network-wait chart, and a manual
+      override per approach. One-command `docker compose up`. Live state is
+      in-memory (documented Redis/TimescaleDB swap-in). See
+      [dashboard/README.md](dashboard/README.md).
 
 ## Layout
 
@@ -46,4 +53,9 @@ each new phase.
 ai-traffic-signal-project.md   Original spec (master prompt, tech stack, roadmap)
 simulation/                    Phases 1+3+4+5: SUMO network, demand, baseline + adaptive + coordinated + RL controllers, reports
 detection/                     Phase 2: YOLOv8 vehicle detection, tracking, queue estimation
+dashboard/                     Phase 6: FastAPI backend + React dashboard + docker-compose
 ```
+
+All six phases are complete. See each subdirectory's README for setup and the
+`simulation/results/*.md` reports for the fixed vs adaptive vs coordinated vs
+RL comparisons.

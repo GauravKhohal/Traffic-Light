@@ -1,0 +1,30 @@
+# One-command dashboard stack.
+#
+#   docker compose up --build            # demo feed (no simulation needed)
+#   DASHBOARD_FEED=mqtt docker compose up --build
+#     then feed live data from the repo root:
+#     python simulation/scripts/run_coordinated.py --transport mqtt
+#
+# Then open http://localhost:8000
+#
+# Production note: the dashboard keeps live state in-memory. The spec's
+# Redis (hot state) and PostgreSQL/TimescaleDB (history) would slot in behind
+# backend/state_store.py without touching the API or frontend.
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  dashboard:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DASHBOARD_FEED=${DASHBOARD_FEED:-demo}
+      - MQTT_HOST=mosquitto
+      - MQTT_PORT=1883
+    depends_on:
+      - mosquitto

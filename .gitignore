@@ -8,3 +8,6 @@ detection/models/
 detection/outputs/
 simulation/rl/models/
 simulation/rl/tensorboard/
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+dashboard/backend/__pycache__/
