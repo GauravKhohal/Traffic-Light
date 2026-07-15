@@ -84,7 +84,10 @@ def main(scenario, adaptive, pace):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--scenario", default="demo_gui")
+    ap.add_argument("--images", action="store_true",
+                    help="render vehicles as overhead images (car/jeep/truck/bus) instead of shapes")
     ap.add_argument("--fixed", action="store_true", help="run the fixed-time baseline instead of adaptive")
     ap.add_argument("--pace", type=float, default=0.05, help="extra real seconds per sim step")
     a = ap.parse_args()
-    main(a.scenario, adaptive=not a.fixed, pace=a.pace)
+    scenario = "demo_gui_img" if (a.images and a.scenario == "demo_gui") else a.scenario
+    main(scenario, adaptive=not a.fixed, pace=a.pace)

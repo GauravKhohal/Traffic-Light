@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Same demo traffic as demo_gui.rou.xml, but each vehicle type renders as an
+     overhead image (imgFile) instead of a coloured polygon, so the SUMO GUI
+     shows car / jeep / truck / bus pictures. Generate the images first:
+         python simulation/assets/generate_vehicle_sprites.py
+     Paths are relative to this file (demand/ -> ../assets/vehicles/). Replace
+     the PNGs with real overhead photos to use actual vehicle images. -->
+<routes>
+  <vType id="car"   vClass="passenger" length="4.6"  width="2.0" imgFile="../assets/vehicles/car.png"   accel="2.6" decel="4.5" sigma="0.5" maxSpeed="14"/>
+  <vType id="jeep"  vClass="passenger" length="5.2"  width="2.1" imgFile="../assets/vehicles/jeep.png"  accel="2.4" decel="4.5" sigma="0.5" maxSpeed="13"/>
+  <vType id="truck" vClass="truck"     length="9.0"  width="2.5" imgFile="../assets/vehicles/truck.png" accel="1.3" decel="4.0" sigma="0.5" maxSpeed="10"/>
+  <vType id="bus"   vClass="bus"       length="10.0" width="2.6" imgFile="../assets/vehicles/bus.png"   accel="1.5" decel="4.0" sigma="0.5" maxSpeed="11"/>
+
+  <!-- HEAVY eastbound (west approach into B1), mixed vehicle types -->
+  <flow id="eb_car"   type="car"   begin="0" end="3600" vehsPerHour="300" departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_jeep"  type="jeep"  begin="0" end="3600" vehsPerHour="130" departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_truck" type="truck" begin="0" end="3600" vehsPerHour="90"  departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_bus"   type="bus"   begin="0" end="3600" vehsPerHour="50"  departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+
+  <flow id="wb_car"   type="car"   begin="0" end="3600" vehsPerHour="150" departSpeed="max"><route edges="right1C1 C1B1 B1A1 A1left1"/></flow>
+
+  <!-- LIGHT north-south cross traffic through B1 -->
+  <flow id="ns_car"   type="car"   begin="0" end="3600" vehsPerHour="80" departSpeed="max"><route edges="bottom1B0 B0B1 B1B2 B2top1"/></flow>
+  <flow id="sn_jeep"  type="jeep"  begin="0" end="3600" vehsPerHour="80" departSpeed="max"><route edges="top1B2 B2B1 B1B0 B0bottom1"/></flow>
+</routes>
