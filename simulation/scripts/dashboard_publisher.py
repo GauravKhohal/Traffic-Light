@@ -64,7 +64,9 @@ def signal_state(tls, green_phase, route_lanes, controller, now):
     if controller is not None:
         route, kind = controller.route, controller.state
         countdown = max(0, round(controller.switch_at - now))
+        greens = [round(g) for g in controller.greens]  # AI-planned green per approach
     else:
+        greens = [30] * len(route_lanes)  # fixed signals: static 30s plan
         cur = traci.trafficlight.getPhase(tls)
         if cur in green_phase:
             route, kind = green_phase.index(cur), "green"
@@ -79,6 +81,7 @@ def signal_state(tls, green_phase, route_lanes, controller, now):
         "id": tls,
         "t": round(now, 1),
         "queues": queues,
+        "greens": greens,
         "phase": route if kind == "green" else -1,
         "phase_kind": kind,
         "countdown": countdown,

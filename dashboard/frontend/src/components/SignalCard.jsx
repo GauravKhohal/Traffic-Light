@@ -1,10 +1,20 @@
 import { APPROACHES, phaseColor, phaseLabel } from '../constants'
 
-// One intersection: current phase + countdown, per-approach queues, and a
-// manual override button per approach (plus Auto to release).
+// Green time (s) coloured relative to the 30s base: boosted = emerald, trimmed = dim.
+function greenStyle(g) {
+  if (g == null) return 'text-slate-500'
+  if (g >= 38) return 'text-emerald-400 font-semibold'
+  if (g <= 22) return 'text-slate-500'
+  return 'text-slate-300'
+}
+
+// One intersection: current phase + countdown, and per approach the queue plus
+// the AI-planned green time (which grows for busier directions). Manual
+// override button per approach, Auto to release.
 export default function SignalCard({ signal, selected, onSelect, onOverride }) {
-  const { id, queues = {}, phase, countdown, override } = signal
+  const { id, queues = {}, greens = {}, phase, countdown, override } = signal
   const maxQ = Math.max(8, ...APPROACHES.map((a) => queues[a] || 0))
+  const hasGreens = Object.keys(greens).length > 0
 
   return (
     <div
@@ -28,20 +38,30 @@ export default function SignalCard({ signal, selected, onSelect, onOverride }) {
         {override && <span className="ml-2 text-purple-400">override {override}</span>}
       </div>
 
-      <div className="mt-2 space-y-1">
+      <div className="mt-2 grid grid-cols-[0.9rem_1fr_1.3rem_2.4rem] items-center gap-x-2 text-[11px] text-slate-500">
+        <span></span>
+        <span>queue</span>
+        <span className="text-right">cars</span>
+        <span className="text-right">green</span>
+      </div>
+      <div className="mt-1 space-y-1">
         {APPROACHES.map((a) => {
           const q = queues[a] || 0
+          const g = hasGreens ? greens[a] : null
           const isGreen = phase === a
           return (
-            <div key={a} className="flex items-center gap-2">
-              <span className="w-4 text-xs text-slate-400">{a}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded bg-slate-800">
+            <div key={a} className="grid grid-cols-[0.9rem_1fr_1.3rem_2.4rem] items-center gap-x-2">
+              <span className="text-xs text-slate-400">{a}</span>
+              <div className="h-2 overflow-hidden rounded bg-slate-800">
                 <div
                   className="h-full rounded"
                   style={{ width: `${(q / maxQ) * 100}%`, background: isGreen ? '#22c55e' : '#38bdf8' }}
                 />
               </div>
-              <span className="w-6 text-right text-xs tabular-nums text-slate-300">{q}</span>
+              <span className="text-right text-xs tabular-nums text-slate-300">{q}</span>
+              <span className={`text-right text-xs tabular-nums ${greenStyle(g)}`}>
+                {g == null ? '—' : `${g}s`}
+              </span>
             </div>
           )
         })}

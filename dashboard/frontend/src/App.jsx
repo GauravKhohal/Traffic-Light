@@ -55,7 +55,13 @@ export default function App() {
         <WaitChart history={history} />
       </div>
 
-      <h2 className="mb-2 mt-6 text-sm font-semibold text-slate-300">Signals</h2>
+      <div className="mb-2 mt-6 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold text-slate-300">Signals</h2>
+        <p className="text-xs text-slate-500">
+          <span className="text-emerald-400">green</span> column = AI-planned green time per direction
+          (base 30s, up to 60s for busy approaches)
+        </p>
+      </div>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {signals.map((s) => (
           <SignalCard

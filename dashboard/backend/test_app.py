@@ -30,6 +30,8 @@ def test_demo_feed_populates_all_signals():
     assert len(signals) == len(SIGNAL_IDS) == 9
     for s in signals:
         assert set(s["queues"]) == set(APPROACH_LABELS)
+        assert set(s["greens"]) == set(APPROACH_LABELS)
+        assert all(15 <= g <= 60 for g in s["greens"].values())
         assert "phase" in s and "countdown" in s
         assert "x" in s and "y" in s
     assert len(store.history()) == 5
@@ -51,10 +53,13 @@ def test_demo_override_forces_that_approach():
     feed = DemoFeed(store, seed=3)
     feed._tick()
     store.set_override("B1", "S")
-    # after enough ticks to cycle through yellow/all-red, B1 should serve S
-    for _ in range(60):
+    # step until B1 next shows a green (not mid yellow/all-red); it must be S
+    b1 = None
+    for _ in range(120):
         feed._tick()
-    b1 = next(s for s in store.signals() if s["id"] == "B1")
+        b1 = next(s for s in store.signals() if s["id"] == "B1")
+        if b1["phase"] in APPROACH_LABELS:  # a green approach, not a transition
+            break
     assert b1["override"] == "S"
     assert b1["phase"] == "S"
 

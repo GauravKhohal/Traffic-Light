@@ -20,6 +20,18 @@ from state_store import APPROACH_LABELS, StateStore
 SIGNAL_IDS = [c + str(r) for c in "ABC" for r in range(3)]
 YELLOW_S = 4
 ALLRED_S = 2
+GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
+
+
+def plan_greens(queues):
+    """AI green-time allocation per direction (the spec's demand-proportional
+    formula): busier approaches get more green, clamped to [15, 60]s. Returns
+    integer seconds per approach."""
+    n = len(queues)
+    total = sum(queues)
+    if total <= 0:
+        return [GREEN_BASE] * n
+    return [round(max(GREEN_MIN, min(GREEN_MAX, GREEN_BASE * n * q / total))) for q in queues]
 
 
 class DemoFeed:
@@ -34,18 +46,32 @@ class DemoFeed:
             self.sig[sid] = {
                 "route": 0,
                 "kind": "green",
-                "countdown": self.rng.randint(15, 40),
+                "countdown": GREEN_BASE,
                 "queues": [self.rng.randint(0, 6) for _ in range(4)],
+                "greens": [GREEN_BASE] * 4,
+                "rates": self._new_rates(),
             }
+
+    def _new_rates(self):
+        """Per-approach arrival probabilities with one busier direction, so
+        the AI's per-direction green times differ and shift over time."""
+        rates = [self.rng.uniform(0.12, 0.35) for _ in range(4)]
+        rates[self.rng.randrange(4)] = self.rng.uniform(0.45, 0.7)
+        return rates
 
     def _tick_signal(self, sid):
         s = self.sig[sid]
         override = self.store.get_override(sid)
         override_idx = APPROACH_LABELS.index(override) if override in APPROACH_LABELS else None
 
-        # arrivals on every approach; the served approach also discharges
+        # occasionally the demand pattern shifts -> the AI re-allocates green
+        if self.rng.random() < 0.004:
+            s["rates"] = self._new_rates()
+
+        # arrivals per approach (rate-weighted); the served approach discharges
         for i in range(4):
-            s["queues"][i] += self.rng.random() < 0.35
+            if self.rng.random() < s["rates"][i]:
+                s["queues"][i] += 1
         if s["kind"] == "green":
             served = s["route"]
             s["queues"][served] = max(0, s["queues"][served] - self.rng.choice([1, 1, 2]))
@@ -59,18 +85,18 @@ class DemoFeed:
                 s["kind"], s["countdown"] = "yellow", YELLOW_S
             elif s["kind"] == "yellow":
                 s["kind"], s["countdown"] = "allred", ALLRED_S
-            else:  # allred -> next green
-                if override_idx is not None:
-                    s["route"] = override_idx
-                else:
-                    s["route"] = (s["route"] + 1) % 4
-                s["kind"], s["countdown"] = "green", self.rng.randint(15, 40)
+            else:  # all-red -> next green: the AI replans this cycle's greens
+                s["greens"] = plan_greens(s["queues"])
+                s["route"] = override_idx if override_idx is not None else (s["route"] + 1) % 4
+                s["kind"] = "green"
+                s["countdown"] = s["greens"][s["route"]]  # serve exactly the planned time
 
         phase = APPROACH_LABELS[s["route"]] if s["kind"] == "green" else s["kind"]
         self.store.update_signal(
             {
                 "id": sid,
                 "queues": {APPROACH_LABELS[i]: s["queues"][i] for i in range(4)},
+                "greens": {APPROACH_LABELS[i]: s["greens"][i] for i in range(4)},
                 "phase": phase,
                 "phase_index": s["route"] if s["kind"] == "green" else -1,
                 "countdown": max(0, s["countdown"]),
@@ -121,17 +147,21 @@ class MqttFeed:
                 phase = "allred"
             else:
                 phase = APPROACH_LABELS[idx] if 0 <= idx < 4 else "—"
-            self.store.update_signal(
-                {
-                    "id": p["id"],
-                    "queues": {
-                        APPROACH_LABELS[i]: queues[i] for i in range(min(4, len(queues)))
-                    },
-                    "phase": phase,
-                    "phase_index": idx,
-                    "countdown": p.get("countdown"),  # None if not provided
+            greens = p.get("greens")  # AI-planned green seconds per approach
+            state = {
+                "id": p["id"],
+                "queues": {
+                    APPROACH_LABELS[i]: queues[i] for i in range(min(4, len(queues)))
+                },
+                "phase": phase,
+                "phase_index": idx,
+                "countdown": p.get("countdown"),  # None if not provided
+            }
+            if greens:
+                state["greens"] = {
+                    APPROACH_LABELS[i]: greens[i] for i in range(min(4, len(greens)))
                 }
-            )
+            self.store.update_signal(state)
             # record one history point per simulation second, not per message
             t = p.get("t")
             if t != self._last_metric_t:
