@@ -33,9 +33,10 @@ from simulation.coordination.topology import build_topology
 from simulation.coordination.transport import InProcessBus
 
 NET = os.path.join(SIM_ROOT, "network", "grid3x3.net.xml")
-DEMAND = os.path.join(SIM_ROOT, "demand", "corridor.rou.xml")
+DEMAND_DIR = os.path.join(SIM_ROOT, "demand")
 SIM_END = 3600
 CORRIDOR = ["A1", "B1", "C1"]
+SCENARIOS = ["corridor", "low", "medium", "rush", "asymmetric"]
 
 
 def sumo_bin():
@@ -84,8 +85,8 @@ def signal_state(tls, green_phase, route_lanes, controller, now):
     }
 
 
-def run_once(client, pace):
-    traci.start([sumo_bin(), "-n", NET, "-r", DEMAND, "-b", "0", "-e", str(SIM_END),
+def run_once(client, pace, demand):
+    traci.start([sumo_bin(), "-n", NET, "-r", demand, "-b", "0", "-e", str(SIM_END),
                  "--no-step-log", "--no-warnings", "--time-to-teleport", "-1"])
     try:
         topo = build_topology(NET)
@@ -109,14 +110,15 @@ def run_once(client, pace):
         traci.close()
 
 
-def main(host, port, pace, loop):
+def main(host, port, pace, loop, scenario):
+    demand = os.path.join(DEMAND_DIR, f"{scenario}.rou.xml")
     client = mqtt.Client(callback_api_version=mqtt.CallbackAPIVersion.VERSION2, client_id="tl-dash-pub")
     client.connect(host, port)
     client.loop_start()
-    print(f"Publishing all 9 signals to {host}:{port} (Ctrl+C to stop)")
+    print(f"Publishing all 9 signals ({scenario} demand) to {host}:{port} (Ctrl+C to stop)")
     try:
         while True:
-            run_once(client, pace)
+            run_once(client, pace, demand)
             if not loop:
                 break
             print("episode complete; restarting...")
@@ -129,7 +131,9 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="localhost")
     ap.add_argument("--port", type=int, default=1883)
+    ap.add_argument("--scenario", default="corridor", choices=SCENARIOS,
+                    help="traffic demand pattern to simulate")
     ap.add_argument("--pace", type=float, default=0.08, help="real seconds per sim second")
     ap.add_argument("--no-loop", action="store_true")
     a = ap.parse_args()
-    main(a.host, a.port, a.pace, loop=not a.no_loop)
+    main(a.host, a.port, a.pace, loop=not a.no_loop, scenario=a.scenario)

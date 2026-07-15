@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Visual demo demand: a mix of vehicle types so the SUMO GUI shows real
+     car / van (jeep) / truck / bus shapes, with a HEAVY east-west stream and
+     LIGHT cross traffic. Watch the corridor signals (A1-B1-C1) hand the busy
+     east-west approach a long green while the light cross streets get short
+     greens — "where traffic is high, give it green". -->
+<routes>
+  <vType id="car"   vClass="passenger" guiShape="passenger"      length="4.5" color="1,0.85,0.1"  accel="2.6" decel="4.5" sigma="0.5" maxSpeed="14"/>
+  <vType id="jeep"  vClass="passenger" guiShape="passenger/van"  length="5.4" color="0.2,0.8,0.35" accel="2.4" decel="4.5" sigma="0.5" maxSpeed="13"/>
+  <vType id="truck" vClass="truck"     guiShape="truck/trailer"  length="9.0" color="0.9,0.25,0.2" accel="1.3" decel="4.0" sigma="0.5" maxSpeed="10"/>
+  <vType id="bus"   vClass="bus"       guiShape="bus"            length="10.0" color="0.25,0.55,1" accel="1.5" decel="4.0" sigma="0.5" maxSpeed="11"/>
+
+  <!-- HEAVY eastbound (west approach into B1), mixed vehicle types -->
+  <flow id="eb_car"   type="car"   begin="0" end="3600" vehsPerHour="300" departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_jeep"  type="jeep"  begin="0" end="3600" vehsPerHour="130" departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_truck" type="truck" begin="0" end="3600" vehsPerHour="90"  departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+  <flow id="eb_bus"   type="bus"   begin="0" end="3600" vehsPerHour="50"  departSpeed="max"><route edges="left1A1 A1B1 B1C1 C1right1"/></flow>
+
+  <!-- lighter westbound so both corridor directions are alive -->
+  <flow id="wb_car"   type="car"   begin="0" end="3600" vehsPerHour="150" departSpeed="max"><route edges="right1C1 C1B1 B1A1 A1left1"/></flow>
+
+  <!-- LIGHT north-south cross traffic through B1 -->
+  <flow id="ns_car"   type="car"   begin="0" end="3600" vehsPerHour="80" departSpeed="max"><route edges="bottom1B0 B0B1 B1B2 B2top1"/></flow>
+  <flow id="sn_jeep"  type="jeep"  begin="0" end="3600" vehsPerHour="80" departSpeed="max"><route edges="top1B2 B2B1 B1B0 B0bottom1"/></flow>
+</routes>
