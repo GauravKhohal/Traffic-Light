@@ -109,7 +109,7 @@ class DemoFeed:
                 "queues": {APPROACH_LABELS[i]: s["queues"][i] for i in range(4)},
                 "greens": {APPROACH_LABELS[i]: s["greens"][i] for i in range(4)},
                 "phase": phase,
-                "phase_index": s["route"] if s["kind"] == "green" else -1,
+                "phase_index": s["route"],  # active/transitioning approach, always valid
                 "countdown": max(0, s["countdown"]),
             }
         )

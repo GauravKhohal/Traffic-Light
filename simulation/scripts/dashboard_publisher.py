@@ -82,7 +82,7 @@ def signal_state(tls, green_phase, route_lanes, controller, now):
         "t": round(now, 1),
         "queues": queues,
         "greens": greens,
-        "phase": route if kind == "green" else -1,
+        "phase": route,  # active/transitioning approach index, always valid
         "phase_kind": kind,
         "countdown": countdown,
     }
