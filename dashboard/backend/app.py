@@ -67,9 +67,22 @@ class OverrideRequest(BaseModel):
     approach: str | None = None  # an APPROACH_LABEL to force, or null to clear
 
 
+class ModeRequest(BaseModel):
+    mode: str  # "fixed" (plain round-robin) or "ai" (adaptive)
+
+
 @app.get("/api/state")
 def get_state():
     return store.snapshot()
+
+
+@app.post("/api/mode")
+def set_mode(req: ModeRequest):
+    if not store.set_mode(req.mode):
+        return JSONResponse(
+            status_code=400, content={"error": 'mode must be "fixed" or "ai"'}
+        )
+    return {"mode": req.mode}
 
 
 @app.get("/api/signals")

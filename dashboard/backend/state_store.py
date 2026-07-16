@@ -28,6 +28,13 @@ class StateStore:
         self._signals = {}                      # id -> latest state dict
         self._overrides = {}                    # id -> forced approach label
         self._history = deque(maxlen=history_seconds)  # {t, avg_wait, total_queue}
+        # "fixed" = plain round-robin, fixed 30s each, no reaction to demand
+        # (what every uncontrolled intersection does today); "ai" = the
+        # demand-proportional adaptive controller. Only DemoFeed reads this -
+        # it's for showing a client the before/after live, not for the SUMO
+        # research runs, which pick their controller by which script is run.
+        self._mode = "fixed"
+        self._served_since_mode_change = 0
 
     # -- signal state -------------------------------------------------------
     def update_signal(self, state: dict):
@@ -69,6 +76,23 @@ class StateStore:
         with self._lock:
             return self._overrides.get(signal_id)
 
+    # -- control mode (demo feed only) ---------------------------------------
+    def get_mode(self):
+        with self._lock:
+            return self._mode
+
+    def set_mode(self, mode: str):
+        if mode not in ("fixed", "ai"):
+            return False
+        with self._lock:
+            self._mode = mode
+            self._served_since_mode_change = 0  # fair throughput comparison per mode
+        return True
+
+    def record_served(self, n: int = 1):
+        with self._lock:
+            self._served_since_mode_change += n
+
     # -- snapshots ----------------------------------------------------------
     def snapshot(self):
         with self._lock:
@@ -77,6 +101,8 @@ class StateStore:
                     (dict(s) for s in self._signals.values()), key=lambda s: s["id"]
                 ),
                 "history": list(self._history),
+                "mode": self._mode,
+                "served_since_mode_change": self._served_since_mode_change,
             }
 
     def signals(self):

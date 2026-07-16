@@ -10,6 +10,16 @@ export async function postOverride(signalId, approach) {
   return res.json()
 }
 
+// mode: "fixed" (plain round-robin, ignores demand) or "ai" (adaptive)
+export async function postMode(mode) {
+  const res = await fetch('/api/mode', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
+  })
+  return res.json()
+}
+
 // Connect to the live state WebSocket, auto-reconnecting on drop.
 export function connectState(onMessage) {
   let ws

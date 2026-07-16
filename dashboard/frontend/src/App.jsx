@@ -1,18 +1,23 @@
 import { useEffect, useState } from 'react'
-import { connectState, postOverride } from './api'
+import { connectState, postMode, postOverride } from './api'
 import GridMap from './components/GridMap'
 import IntersectionView from './components/IntersectionView'
+import ModeToggle from './components/ModeToggle'
 import SignalCard from './components/SignalCard'
 
 export default function App() {
   const [signals, setSignals] = useState([])
   const [selected, setSelected] = useState(null)
   const [connected, setConnected] = useState(false)
+  const [mode, setMode] = useState('fixed')
+  const [served, setServed] = useState(0)
 
   useEffect(() => {
     const disconnect = connectState((msg) => {
       setConnected(true)
       setSignals(msg.signals || [])
+      if (msg.mode) setMode(msg.mode)
+      if (typeof msg.served_since_mode_change === 'number') setServed(msg.served_since_mode_change)
     })
     return disconnect
   }, [])
@@ -26,7 +31,16 @@ export default function App() {
     await postOverride(id, approach)
   }
 
+  const onModeChange = async (newMode) => {
+    setMode(newMode) // optimistic; the next WS snapshot confirms it
+    await postMode(newMode)
+  }
+
   const selectedSignal = signals.find((s) => s.id === selected)
+  const avgQueue = signals.length
+    ? signals.reduce((sum, s) => sum + Object.values(s.queues || {}).reduce((a, b) => a + b, 0), 0) /
+      (signals.length * 4)
+    : 0
 
   return (
     <div className="mx-auto max-w-6xl p-4 sm:p-6">
@@ -44,6 +58,10 @@ export default function App() {
           {connected ? 'live' : 'connecting…'}
         </span>
       </header>
+
+      <div className="mb-4">
+        <ModeToggle mode={mode} avgQueue={avgQueue} served={served} onChange={onModeChange} />
+      </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">

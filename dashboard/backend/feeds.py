@@ -71,6 +71,7 @@ class DemoFeed:
 
     def _tick_signal(self, sid):
         s = self.sig[sid]
+        ai = self.store.get_mode() == "ai"
         override = self.store.get_override(sid)
         override_idx = APPROACH_LABELS.index(override) if override in APPROACH_LABELS else None
 
@@ -85,7 +86,10 @@ class DemoFeed:
                 s["queues"][i] = min(QUEUE_CAP, s["queues"][i] + 1)
         if s["kind"] == "green":
             served = s["route"]
-            s["queues"][served] = max(0, s["queues"][served] - self.rng.choice([1, 1, 2, 2]))
+            discharge = min(s["queues"][served], self.rng.choice([1, 1, 2, 2]))
+            s["queues"][served] -= discharge
+            if discharge:
+                self.store.record_served(discharge)
             # a manual override to a different approach forces an early switch
             if override_idx is not None and override_idx != served:
                 s["countdown"] = 0
@@ -96,21 +100,28 @@ class DemoFeed:
                 s["kind"], s["countdown"] = "yellow", YELLOW_S
             elif s["kind"] == "yellow":
                 s["kind"], s["countdown"] = "allred", ALLRED_S
-            else:  # all-red -> next green: the AI replans this cycle's greens
-                s["greens"] = plan_greens(s["queues"])
-                if override_idx is not None:
-                    s["route"] = override_idx
-                else:
+            else:  # all-red -> next green
+                if ai:
+                    # AI mode: demand-proportional green (spec formula), and
                     # skip straight past any approach with zero queued
-                    # vehicles instead of giving it a wasted minimum-time
-                    # green - jump ahead to the next approach that actually
-                    # has traffic (up to 3 skips, so it always terminates)
-                    nxt = (s["route"] + 1) % 4
-                    for _ in range(3):
-                        if s["queues"][nxt] > 0:
-                            break
-                        nxt = (nxt + 1) % 4
-                    s["route"] = nxt
+                    # vehicles instead of wasting a turn on it (up to 3
+                    # skips, so it always terminates)
+                    s["greens"] = plan_greens(s["queues"])
+                    if override_idx is not None:
+                        nxt = override_idx
+                    else:
+                        nxt = (s["route"] + 1) % 4
+                        for _ in range(3):
+                            if s["queues"][nxt] > 0:
+                                break
+                            nxt = (nxt + 1) % 4
+                else:
+                    # fixed mode: the "general" behaviour every uncontrolled
+                    # intersection runs today - plain round robin, ignores
+                    # queue length entirely, always the base 30s
+                    s["greens"] = [GREEN_BASE] * 4
+                    nxt = override_idx if override_idx is not None else (s["route"] + 1) % 4
+                s["route"] = nxt
                 s["kind"] = "green"
                 s["countdown"] = s["greens"][s["route"]]  # serve exactly the planned time
 

@@ -64,6 +64,49 @@ def test_demo_override_forces_that_approach():
     assert b1["phase"] == "S"
 
 
+def test_mode_defaults_fixed_and_switch_resets_served():
+    store = StateStore()
+    assert store.get_mode() == "fixed"
+    store.record_served(5)
+    assert store.set_mode("ai") is True
+    assert store.get_mode() == "ai"
+    assert store.snapshot()["served_since_mode_change"] == 0  # reset on switch
+    assert store.set_mode("nonsense") is False
+    assert store.get_mode() == "ai"  # unchanged by the rejected call
+
+
+def test_fixed_mode_ignores_demand():
+    store = StateStore()
+    store.set_mode("fixed")
+    feed = DemoFeed(store, seed=4)
+    # force one approach heavily busy, others empty
+    feed.sig["B1"]["queues"] = [22, 0, 0, 0]
+    feed.sig["B1"]["rates"] = [0.0, 0.0, 0.0, 0.0]  # freeze arrivals
+    for _ in range(400):
+        feed._tick_signal("B1")
+    b1 = next(s for s in store.signals() if s["id"] == "B1")
+    # fixed mode: every green is exactly the base 30s regardless of queue
+    assert all(g == 30 for g in b1["greens"].values())
+
+
+def test_ai_mode_reacts_to_demand_and_skips_empty():
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=4)
+    feed.sig["B1"]["queues"] = [22, 0, 0, 0]
+    feed.sig["B1"]["rates"] = [0.0, 0.0, 0.0, 0.0]
+    feed.sig["B1"]["route"] = 1  # currently serving the empty E approach
+    feed.sig["B1"]["kind"] = "green"
+    feed.sig["B1"]["countdown"] = 1
+    for _ in range(20):
+        feed._tick_signal("B1")
+    b1 = next(s for s in store.signals() if s["id"] == "B1")
+    # jumps straight to the busy N approach with a boosted green, skipping
+    # the empty S/W approaches entirely
+    assert b1["phase"] == "N"
+    assert b1["greens"]["N"] == 60
+
+
 def test_rest_and_websocket_endpoints():
     from app import app
 
@@ -77,7 +120,12 @@ def test_rest_and_websocket_endpoints():
 
         state = client.get("/api/state").json()
         assert state["signals"], "no signals populated"
+        assert state["mode"] == "fixed"
         sid = state["signals"][0]["id"]
+
+        assert client.post("/api/mode", json={"mode": "bogus"}).status_code == 400
+        assert client.post("/api/mode", json={"mode": "ai"}).status_code == 200
+        assert client.get("/api/state").json()["mode"] == "ai"
 
         assert client.post(f"/api/signals/{sid}/override", json={"approach": "E"}).status_code == 200
         assert client.post(f"/api/signals/{sid}/override", json={"approach": "X"}).status_code == 400
