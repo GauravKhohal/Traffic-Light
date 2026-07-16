@@ -177,6 +177,55 @@ export default function IntersectionView({ signal }) {
           </div>
         ))}
       </div>
+
+      <StatusList signal={signal} activeIdx={activeIdx} isGreenNow={isGreenNow} phase={phase} countdown={countdown} />
+    </div>
+  )
+}
+
+// Unambiguous, plain-text readout — one row per approach, in the order it
+// will actually be served, so there's no small overlapping SVG text to
+// misread. This is the same eta/skip logic as the diagram, just spelled out.
+function StatusList({ signal, activeIdx, isGreenNow, phase, countdown }) {
+  const { queues = {} } = signal
+  const rows = APPROACHES.map((a, i) => {
+    const q = queues[a] || 0
+    const isActive = i === activeIdx
+    return {
+      approach: a,
+      queue: q,
+      isActive,
+      isGreen: isActive && isGreenNow,
+      isYellow: isActive && phase === 'yellow',
+      eta: isActive ? 0 : etaSeconds(signal, i),
+    }
+  })
+  rows.sort((a, b) => (b.isActive - a.isActive) || (a.eta ?? 1e9) - (b.eta ?? 1e9))
+
+  return (
+    <div className="mt-3 divide-y divide-slate-800 rounded-lg bg-slate-800/40 text-sm">
+      {rows.map((r) => (
+        <div key={r.approach} className="flex items-center justify-between px-3 py-1.5">
+          <span className="flex items-center gap-2">
+            <span
+              className={`inline-block h-2 w-2 rounded-full ${
+                r.isGreen ? 'bg-emerald-400' : r.isYellow ? 'bg-amber-400' : 'bg-slate-600'
+              }`}
+            />
+            <span className="font-semibold">{r.approach}</span>
+            <span className="text-slate-400">· {r.queue} car{r.queue === 1 ? '' : 's'}</span>
+          </span>
+          <span className={r.isGreen ? 'font-semibold text-emerald-400' : r.isYellow ? 'text-amber-400' : 'text-slate-400'}>
+            {r.isGreen
+              ? `GREEN, ${countdown}s left`
+              : r.isYellow
+                ? `yellow, ${countdown}s`
+                : r.queue === 0
+                  ? 'empty — will be skipped'
+                  : `next in ~${r.eta}s`}
+          </span>
+        </div>
+      ))}
     </div>
   )
 }
