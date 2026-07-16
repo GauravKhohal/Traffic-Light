@@ -107,6 +107,51 @@ def test_ai_mode_reacts_to_demand_and_skips_empty():
     assert b1["greens"]["N"] == 60
 
 
+def test_ai_mode_gapout_ends_empty_green_early():
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=6)
+    s = feed.sig["B1"]
+    s["queues"] = [0, 22, 0, 0]  # currently-served approach just drained; E is heavy
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]  # freeze arrivals so the queue can't refill
+    s["route"] = 0
+    s["kind"] = "green"
+    s["greens"] = [30, 30, 30, 30]
+    s["countdown"] = 24  # elapsed = 30-24 = 6s, past the 5s minimum
+    feed._tick_signal("B1")
+    assert s["kind"] == "yellow"  # cut short rather than idling out a 30s green on nobody
+
+
+def test_ai_mode_no_gapout_before_min_green():
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=6)
+    s = feed.sig["B1"]
+    s["queues"] = [0, 22, 0, 0]
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 0
+    s["kind"] = "green"
+    s["greens"] = [30, 30, 30, 30]
+    s["countdown"] = 27  # elapsed = 3s, under the 5s minimum
+    feed._tick_signal("B1")
+    assert s["kind"] == "green"  # too soon - avoids flickering a just-started green
+
+
+def test_fixed_mode_never_gaps_out():
+    store = StateStore()
+    store.set_mode("fixed")
+    feed = DemoFeed(store, seed=6)
+    s = feed.sig["B1"]
+    s["queues"] = [0, 22, 0, 0]
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 0
+    s["kind"] = "green"
+    s["greens"] = [30, 30, 30, 30]
+    s["countdown"] = 10  # well past the AI minimum, but fixed mode never gaps out
+    feed._tick_signal("B1")
+    assert s["kind"] == "green"
+
+
 def test_rest_and_websocket_endpoints():
     from app import app
 

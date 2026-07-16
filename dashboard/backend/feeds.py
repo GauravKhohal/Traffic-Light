@@ -29,6 +29,12 @@ QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how lon
 # that lane. Override with DASHBOARD_DEMO_PACE (e.g. "1.0" for real-time).
 DEMO_PACE_S = float(os.environ.get("DASHBOARD_DEMO_PACE", "1.5"))
 
+# "Gap-out": in AI mode, a green that has fully drained its own queue ends
+# early (once at least this many seconds have run, to avoid flicker) instead
+# of burning its remaining planned time on an empty lane while another
+# approach waits - the immediate hand-off a real actuated signal makes.
+MIN_GREEN_BEFORE_GAPOUT_S = 5
+
 
 def plan_greens(queues):
     """AI green-time allocation per direction (the spec's demand-proportional
@@ -93,6 +99,14 @@ class DemoFeed:
             # a manual override to a different approach forces an early switch
             if override_idx is not None and override_idx != served:
                 s["countdown"] = 0
+            elif ai and override_idx is None:
+                # gap-out: this approach's own queue just drained and another
+                # approach has traffic waiting - end the green now instead of
+                # burning the rest of its planned time on an empty lane
+                elapsed = s["greens"][served] - s["countdown"]
+                others_waiting = any(q > 0 for i, q in enumerate(s["queues"]) if i != served)
+                if s["queues"][served] == 0 and others_waiting and elapsed >= MIN_GREEN_BEFORE_GAPOUT_S:
+                    s["countdown"] = 0
 
         s["countdown"] -= 1
         if s["countdown"] <= 0:
