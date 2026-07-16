@@ -13,6 +13,7 @@ Selected by the DASHBOARD_FEED env var ("demo" or "mqtt").
 """
 import asyncio
 import json
+import os
 import random
 
 from state_store import APPROACH_LABELS, StateStore
@@ -21,6 +22,12 @@ SIGNAL_IDS = [c + str(r) for c in "ABC" for r in range(3)]
 YELLOW_S = 4
 ALLRED_S = 2
 GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
+QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how long it runs
+
+# Real seconds per simulated second of the demo feed. >1 = slow motion, so a
+# viewer can actually watch a queue build and then drain when the AI opens
+# that lane. Override with DASHBOARD_DEMO_PACE (e.g. "1.0" for real-time).
+DEMO_PACE_S = float(os.environ.get("DASHBOARD_DEMO_PACE", "1.5"))
 
 
 def plan_greens(queues):
@@ -53,10 +60,13 @@ class DemoFeed:
             }
 
     def _new_rates(self):
-        """Per-approach arrival probabilities with one busier direction, so
-        the AI's per-direction green times differ and shift over time."""
-        rates = [self.rng.uniform(0.12, 0.35) for _ in range(4)]
-        rates[self.rng.randrange(4)] = self.rng.uniform(0.45, 0.7)
+        """Per-approach arrival probabilities with one clearly busier
+        direction, so the AI's per-direction green times differ and its
+        reaction (long green on the busy lane) is visible. Tuned so the busy
+        lane's queue rises over a red span and comfortably drains within its
+        allotted green, rather than growing without bound."""
+        rates = [self.rng.uniform(0.03, 0.10) for _ in range(4)]
+        rates[self.rng.randrange(4)] = self.rng.uniform(0.25, 0.42)
         return rates
 
     def _tick_signal(self, sid):
@@ -68,13 +78,14 @@ class DemoFeed:
         if self.rng.random() < 0.004:
             s["rates"] = self._new_rates()
 
-        # arrivals per approach (rate-weighted); the served approach discharges
+        # arrivals per approach (rate-weighted, capped so the demo is always
+        # bounded no matter how long it's left running)
         for i in range(4):
             if self.rng.random() < s["rates"][i]:
-                s["queues"][i] += 1
+                s["queues"][i] = min(QUEUE_CAP, s["queues"][i] + 1)
         if s["kind"] == "green":
             served = s["route"]
-            s["queues"][served] = max(0, s["queues"][served] - self.rng.choice([1, 1, 2]))
+            s["queues"][served] = max(0, s["queues"][served] - self.rng.choice([1, 1, 2, 2]))
             # a manual override to a different approach forces an early switch
             if override_idx is not None and override_idx != served:
                 s["countdown"] = 0
@@ -114,7 +125,7 @@ class DemoFeed:
     async def run(self):
         while True:
             self._tick()
-            await asyncio.sleep(1.0)
+            await asyncio.sleep(DEMO_PACE_S)
 
 
 class MqttFeed:
