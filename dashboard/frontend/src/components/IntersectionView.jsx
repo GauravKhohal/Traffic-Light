@@ -11,9 +11,13 @@ const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb9
 // Estimated seconds until `targetIdx` next gets green, walking the fixed
 // N->E->S->W rotation from the currently-active approach (phase_index is
 // always the active/transitioning approach, regardless of green/yellow/
-// all-red). Returns null only if the feed hasn't sent usable data yet.
+// all-red). Mirrors the backend's skip-empty-approach behaviour: an approach
+// with zero queued vehicles right now is assumed to be skipped entirely (no
+// time added), so a busy approach's estimate reflects that it's promoted
+// ahead of empty ones rather than waiting through them. Returns null only if
+// the feed hasn't sent usable data yet.
 function etaSeconds(signal, targetIdx) {
-  const { phase_index: active, countdown, greens = {} } = signal
+  const { phase_index: active, countdown, greens = {}, queues = {} } = signal
   if (active == null || active < 0 || countdown == null) return null
   const kind = signal.phase
   const isGreenNow = APPROACHES.includes(kind)
@@ -27,7 +31,9 @@ function etaSeconds(signal, targetIdx) {
 
   let i = (active + 1) % 4
   while (i !== targetIdx) {
-    t += (greens[APPROACHES[i]] ?? 30) + YELLOW_S + ALLRED_S
+    if ((queues[APPROACHES[i]] || 0) > 0) {
+      t += (greens[APPROACHES[i]] ?? 30) + YELLOW_S + ALLRED_S
+    }
     i = (i + 1) % 4
   }
   return t

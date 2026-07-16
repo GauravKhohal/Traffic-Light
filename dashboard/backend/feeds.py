@@ -98,7 +98,19 @@ class DemoFeed:
                 s["kind"], s["countdown"] = "allred", ALLRED_S
             else:  # all-red -> next green: the AI replans this cycle's greens
                 s["greens"] = plan_greens(s["queues"])
-                s["route"] = override_idx if override_idx is not None else (s["route"] + 1) % 4
+                if override_idx is not None:
+                    s["route"] = override_idx
+                else:
+                    # skip straight past any approach with zero queued
+                    # vehicles instead of giving it a wasted minimum-time
+                    # green - jump ahead to the next approach that actually
+                    # has traffic (up to 3 skips, so it always terminates)
+                    nxt = (s["route"] + 1) % 4
+                    for _ in range(3):
+                        if s["queues"][nxt] > 0:
+                            break
+                        nxt = (nxt + 1) % 4
+                    s["route"] = nxt
                 s["kind"] = "green"
                 s["countdown"] = s["greens"][s["route"]]  # serve exactly the planned time
 
