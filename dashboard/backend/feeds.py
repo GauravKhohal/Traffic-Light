@@ -16,13 +16,43 @@ import json
 import os
 import random
 
-from state_store import APPROACH_LABELS, StateStore
+from state_store import APPROACH_LABELS, StateStore, grid_position
 
 SIGNAL_IDS = [c + str(r) for c in "ABC" for r in range(3)]
 YELLOW_S = 4
 ALLRED_S = 2
 GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
 QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how long it runs
+
+# Grid-coordinate step (col, row) toward the neighbour that FEEDS each
+# approach: e.g. a signal's "N" queue is fed by the neighbour one row north
+# (vehicles heading south), and that signal's own N-approach discharge
+# continues south, landing in the N queue of the neighbour one row south -
+# straight-through corridors, matching a real Manhattan grid. Independent of
+# the frontend's on-screen pixel directions (constants.js DIR).
+NEIGHBOR_STEP = {"N": (0, 1), "S": (0, -1), "E": (1, 0), "W": (-1, 0)}
+
+
+def _signal_at(x, y):
+    if 0 <= x <= 2 and 0 <= y <= 2:
+        return "ABC"[x] + str(y)
+    return None
+
+
+def _upstream_neighbor(sid, approach):
+    """The signal whose same-label discharge feeds this approach, or None if
+    this approach sits on the grid's fringe (fed by outside/external demand)."""
+    x, y = grid_position(sid)
+    dx, dy = NEIGHBOR_STEP[approach]
+    return _signal_at(x + dx, y + dy)
+
+
+def _downstream_neighbor(sid, approach):
+    """Where this approach's own discharge continues on to, or None if it
+    exits the grid."""
+    x, y = grid_position(sid)
+    dx, dy = NEIGHBOR_STEP[approach]
+    return _signal_at(x - dx, y - dy)
 
 # Real seconds per simulated second of the demo feed. >1 = slow motion, so a
 # viewer can actually watch a queue build and then drain when the AI opens
@@ -54,6 +84,14 @@ class DemoFeed:
         self.store = store
         self.rng = random.Random(seed)
         self._avg_wait = 0.0
+        # precompute static topology once: which approaches are fed by a
+        # neighbour's discharge (interior) vs. from outside the grid (fringe)
+        self.upstream = {
+            sid: {a: _upstream_neighbor(sid, a) for a in APPROACH_LABELS} for sid in SIGNAL_IDS
+        }
+        self.downstream = {
+            sid: {a: _downstream_neighbor(sid, a) for a in APPROACH_LABELS} for sid in SIGNAL_IDS
+        }
         self.sig = {}
         for sid in SIGNAL_IDS:
             self.sig[sid] = {
@@ -62,17 +100,24 @@ class DemoFeed:
                 "countdown": GREEN_BASE,
                 "queues": [self.rng.randint(0, 6) for _ in range(4)],
                 "greens": [GREEN_BASE] * 4,
-                "rates": self._new_rates(),
+                "rates": self._new_rates(sid),
             }
 
-    def _new_rates(self):
-        """Per-approach arrival probabilities with one clearly busier
-        direction, so the AI's per-direction green times differ and its
-        reaction (long green on the busy lane) is visible. Tuned so the busy
-        lane's queue rises over a red span and comfortably drains within its
-        allotted green, rather than growing without bound."""
-        rates = [self.rng.uniform(0.03, 0.10) for _ in range(4)]
-        rates[self.rng.randrange(4)] = self.rng.uniform(0.25, 0.42)
+    def _new_rates(self, sid):
+        """Per-approach arrival probabilities. Only approaches on the grid's
+        fringe (no upstream neighbour, i.e. real traffic entering from
+        outside) get random demand, one of them boosted to a clearly busier
+        rate so there's an obvious source for congestion to propagate from.
+        Interior approaches (fed by a neighbour's own discharge - see
+        _tick()'s propagation step) get only a small local trickle; their
+        real demand comes from actual upstream traffic, not randomness,
+        which is the whole point of connecting the signals together."""
+        fringe = [i for i, a in enumerate(APPROACH_LABELS) if self.upstream[sid][a] is None]
+        rates = [self.rng.uniform(0.01, 0.03) for _ in range(4)]
+        for i in fringe:
+            rates[i] = self.rng.uniform(0.03, 0.10)
+        if fringe:
+            rates[self.rng.choice(fringe)] = self.rng.uniform(0.25, 0.42)
         return rates
 
     def _tick_signal(self, sid):
@@ -83,19 +128,23 @@ class DemoFeed:
 
         # occasionally the demand pattern shifts -> the AI re-allocates green
         if self.rng.random() < 0.004:
-            s["rates"] = self._new_rates()
+            s["rates"] = self._new_rates(sid)
 
-        # arrivals per approach (rate-weighted, capped so the demo is always
-        # bounded no matter how long it's left running)
+        # local arrivals: fringe approaches get real random demand from
+        # outside the grid; interior approaches only a small trickle, since
+        # their real traffic arrives via _tick()'s neighbour propagation
         for i in range(4):
             if self.rng.random() < s["rates"][i]:
                 s["queues"][i] = min(QUEUE_CAP, s["queues"][i] + 1)
+
+        discharged = {a: 0 for a in APPROACH_LABELS}
         if s["kind"] == "green":
             served = s["route"]
             discharge = min(s["queues"][served], self.rng.choice([1, 1, 2, 2]))
             s["queues"][served] -= discharge
             if discharge:
                 self.store.record_served(discharge)
+                discharged[APPROACH_LABELS[served]] = discharge
             # a manual override to a different approach forces an early switch
             if override_idx is not None and override_idx != served:
                 s["countdown"] = 0
@@ -150,10 +199,30 @@ class DemoFeed:
                 "countdown": max(0, s["countdown"]),
             }
         )
+        return discharged
 
     def _tick(self):
-        for sid in SIGNAL_IDS:
-            self._tick_signal(sid)
+        # 1) each signal advances independently (local arrivals + discharge
+        #    if serving), recording what it discharged this tick per approach
+        discharged = {sid: self._tick_signal(sid) for sid in SIGNAL_IDS}
+
+        # 2) connect the grid: route each signal's discharge into the
+        #    matching queue of its downstream neighbour (straight-through
+        #    corridor), arriving next tick - real inter-signal traffic flow,
+        #    not independent per-node randomness. A signal on the AI-mode
+        #    side of the toggle reacts to this exactly like any other
+        #    demand: bigger queue -> more green -> less chance of pile-up.
+        for sid, amounts in discharged.items():
+            for approach, amount in amounts.items():
+                if amount <= 0:
+                    continue
+                down_sid = self.downstream[sid][approach]
+                if down_sid is None:
+                    continue  # exits the grid at the fringe
+                idx = APPROACH_LABELS.index(approach)
+                down = self.sig[down_sid]
+                down["queues"][idx] = min(QUEUE_CAP, down["queues"][idx] + amount)
+
         total_queue = sum(sum(s["queues"]) for s in self.sig.values())
         # smooth synthetic network wait proxy tracking total congestion
         self._avg_wait = 0.85 * self._avg_wait + 0.15 * (total_queue * 2.5)

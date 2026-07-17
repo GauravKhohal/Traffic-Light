@@ -152,6 +152,49 @@ def test_fixed_mode_never_gaps_out():
     assert s["kind"] == "green"
 
 
+def test_topology_upstream_downstream():
+    store = StateStore()
+    feed = DemoFeed(store, seed=1)
+    # B1 (centre of the grid) is fully interior: every approach is fed by a
+    # real neighbour, none from outside the grid
+    assert all(feed.upstream["B1"][a] is not None for a in APPROACH_LABELS)
+    # A0 (bottom-left corner) has two fringe approaches (grid edges) and two
+    # fed by real neighbours
+    assert feed.upstream["A0"]["S"] is None  # bottom edge - nothing further south
+    assert feed.upstream["A0"]["W"] is None  # left edge - nothing further west
+    assert feed.upstream["A0"]["N"] == "A1"
+    assert feed.upstream["A0"]["E"] == "B0"
+
+
+def test_interior_signal_has_no_boosted_local_rate():
+    store = StateStore()
+    feed = DemoFeed(store, seed=3)
+    # B1 has zero fringe approaches, so none of its local rates should ever
+    # be boosted to the "busy external demand" range - its only real demand
+    # comes from neighbours' discharge
+    assert all(r <= 0.03 for r in feed.sig["B1"]["rates"])
+
+
+def test_discharge_propagates_to_downstream_neighbor():
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=2)
+    b1 = feed.sig["B1"]
+    b1["queues"] = [5, 0, 0, 0]  # N approach has demand
+    b1["rates"] = [0.0, 0.0, 0.0, 0.0]
+    b1["route"] = 0
+    b1["kind"] = "green"
+    b1["greens"] = [30, 30, 30, 30]
+    b1["countdown"] = 20
+    feed.sig["B0"]["rates"] = [0.0, 0.0, 0.0, 0.0]  # isolate: only propagation can grow it
+    feed.sig["B0"]["kind"] = "allred"  # not currently discharging anything itself
+    feed.sig["B0"]["countdown"] = 100
+    before = feed.sig["B0"]["queues"][0]  # B0's N-approach queue
+    feed._tick()
+    after = feed.sig["B0"]["queues"][0]
+    assert after > before, "B1's N-approach discharge should arrive at B0's N-approach queue"
+
+
 def test_rest_and_websocket_endpoints():
     from app import app
 
