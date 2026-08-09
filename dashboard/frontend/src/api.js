@@ -1,8 +1,10 @@
-// REST + WebSocket helpers. Same-origin in production (backend serves the
-// build); Vite proxies these to the backend in dev.
+// REST + WebSocket helpers. Same-origin by default (backend serves the
+// build, Vite proxies in dev). Set VITE_API_BASE (e.g. in Vercel) to point
+// at a backend hosted on a different origin, such as a Railway deployment.
+const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
 
 export async function postOverride(signalId, approach) {
-  const res = await fetch(`/api/signals/${signalId}/override`, {
+  const res = await fetch(`${API_BASE}/api/signals/${signalId}/override`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ approach }),
@@ -12,7 +14,7 @@ export async function postOverride(signalId, approach) {
 
 // mode: "fixed" (plain round-robin, ignores demand) or "ai" (adaptive)
 export async function postMode(mode) {
-  const res = await fetch('/api/mode', {
+  const res = await fetch(`${API_BASE}/api/mode`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode }),
@@ -24,9 +26,11 @@ export async function postMode(mode) {
 export function connectState(onMessage) {
   let ws
   let closed = false
+  const wsBase = API_BASE
+    ? API_BASE.replace(/^http/, 'ws')
+    : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`
   const connect = () => {
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    ws = new WebSocket(`${proto}://${location.host}/ws`)
+    ws = new WebSocket(`${wsBase}/ws`)
     ws.onmessage = (e) => onMessage(JSON.parse(e.data))
     ws.onclose = () => {
       if (!closed) setTimeout(connect, 1000)
