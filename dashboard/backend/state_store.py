@@ -35,6 +35,10 @@ class StateStore:
         # research runs, which pick their controller by which script is run.
         self._mode = "fixed"
         self._served_since_mode_change = 0
+        # lets a presenter freeze the demo feed mid-tick (talk over a frozen
+        # screen) and resume from exactly where it left off; DemoFeed reads
+        # this each loop iteration, MqttFeed ignores it (real data passthrough)
+        self._running = True
 
     # -- signal state -------------------------------------------------------
     def update_signal(self, state: dict):
@@ -93,6 +97,15 @@ class StateStore:
         with self._lock:
             self._served_since_mode_change += n
 
+    # -- run/pause (demo feed only) ------------------------------------------
+    def get_running(self):
+        with self._lock:
+            return self._running
+
+    def set_running(self, running: bool):
+        with self._lock:
+            self._running = running
+
     # -- snapshots ----------------------------------------------------------
     def snapshot(self):
         with self._lock:
@@ -103,6 +116,7 @@ class StateStore:
                 "history": list(self._history),
                 "mode": self._mode,
                 "served_since_mode_change": self._served_since_mode_change,
+                "running": self._running,
             }
 
     def signals(self):

@@ -22,6 +22,17 @@ export async function postMode(mode) {
   return res.json()
 }
 
+// running: true resumes the demo feed, false freezes it mid-tick (screen
+// stays exactly as-is until resumed) - lets a presenter pause to talk.
+export async function postRunning(running) {
+  const res = await fetch(`${API_BASE}/api/demo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ running }),
+  })
+  return res.json()
+}
+
 // Connect to the live state WebSocket, auto-reconnecting on drop.
 export function connectState(onMessage) {
   let ws

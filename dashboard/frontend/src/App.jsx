@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { connectState, postMode, postOverride } from './api'
+import { connectState, postMode, postOverride, postRunning } from './api'
 import GridMap from './components/GridMap'
 import IntersectionView from './components/IntersectionView'
 import ModeToggle from './components/ModeToggle'
@@ -11,6 +11,7 @@ export default function App() {
   const [connected, setConnected] = useState(false)
   const [mode, setMode] = useState('fixed')
   const [served, setServed] = useState(0)
+  const [running, setRunning] = useState(true)
 
   useEffect(() => {
     const disconnect = connectState((msg) => {
@@ -18,9 +19,16 @@ export default function App() {
       setSignals(msg.signals || [])
       if (msg.mode) setMode(msg.mode)
       if (typeof msg.served_since_mode_change === 'number') setServed(msg.served_since_mode_change)
+      if (typeof msg.running === 'boolean') setRunning(msg.running)
     })
     return disconnect
   }, [])
+
+  const onToggleRunning = async () => {
+    const next = !running
+    setRunning(next) // optimistic; the next WS snapshot confirms it
+    await postRunning(next)
+  }
 
   // default the close-up view to the first signal once data arrives
   useEffect(() => {
@@ -49,14 +57,26 @@ export default function App() {
           <h1 className="text-xl font-bold">Adaptive Traffic Signal Control</h1>
           <p className="text-sm text-slate-400">Live 3×3 intersection grid</p>
         </div>
-        <span
-          className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-            connected ? 'bg-emerald-900/60 text-emerald-300' : 'bg-slate-800 text-slate-400'
-          }`}
-        >
-          <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
-          {connected ? 'live' : 'connecting…'}
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+              connected ? 'bg-emerald-900/60 text-emerald-300' : 'bg-slate-800 text-slate-400'
+            }`}
+          >
+            <span className={`h-2 w-2 rounded-full ${connected ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+            {connected ? 'live' : 'connecting…'}
+          </span>
+          <button
+            onClick={onToggleRunning}
+            className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+              running
+                ? 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                : 'bg-amber-900/60 text-amber-300 hover:bg-amber-900'
+            }`}
+          >
+            {running ? '⏸ Stop demo' : '▶ Resume demo'}
+          </button>
+        </div>
       </header>
 
       <div className="mb-4">

@@ -71,6 +71,10 @@ class ModeRequest(BaseModel):
     mode: str  # "fixed" (plain round-robin) or "ai" (adaptive)
 
 
+class RunningRequest(BaseModel):
+    running: bool  # False freezes the demo feed mid-tick; True resumes it
+
+
 @app.get("/api/state")
 def get_state():
     return store.snapshot()
@@ -83,6 +87,12 @@ def set_mode(req: ModeRequest):
             status_code=400, content={"error": 'mode must be "fixed" or "ai"'}
         )
     return {"mode": req.mode}
+
+
+@app.post("/api/demo")
+def set_running(req: RunningRequest):
+    store.set_running(req.running)
+    return {"running": req.running}
 
 
 @app.get("/api/signals")

@@ -230,8 +230,13 @@ class DemoFeed:
 
     async def run(self):
         while True:
-            self._tick()
-            await asyncio.sleep(DEMO_PACE_S)
+            if self.store.get_running():
+                self._tick()
+                await asyncio.sleep(DEMO_PACE_S)
+            else:
+                # poll quickly while paused so resume picks up right away
+                # instead of waiting out the rest of a normal tick interval
+                await asyncio.sleep(0.2)
 
 
 class MqttFeed:
