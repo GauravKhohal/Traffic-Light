@@ -215,6 +215,17 @@ export default function IntersectionView({ signal }) {
           const leftAnchor = { x: sx + leftPerp.x * CLUSTER_GAP, y: sy + leftPerp.y * CLUSTER_GAP }
           const rightAnchor = { x: sx + rightPerp.x * CLUSTER_GAP, y: sy + rightPerp.y * CLUSTER_GAP }
 
+          // Label + countdown sit off to the side of the signal head, not
+          // further out along the travel axis - that's where this approach's
+          // own queued cars are (they were overlapping the timer). Each
+          // approach gets its own quadrant (N->NW, E->NE, S->SE, W->SW) so no
+          // two approaches' text ever land near each other, and "side" is
+          // always the road's own perpendicular axis, clear of its car lanes.
+          const QUADRANT = { N: { x: -1, y: 0 }, E: { x: 0, y: -1 }, S: { x: 1, y: 0 }, W: { x: 0, y: 1 } }
+          const side = QUADRANT[approach]
+          const textX = sx + side.x * 32
+          const textY = sy + side.y * 32
+
           return (
             <g key={approach}>
               {cars}
@@ -224,14 +235,14 @@ export default function IntersectionView({ signal }) {
               <Arrow cx={straightAnchor.x} cy={straightAnchor.y} ux={travel.x} uy={travel.y} color={straightColor} />
               <Arrow cx={rightAnchor.x} cy={rightAnchor.y} ux={rightPerp.x} uy={rightPerp.y} color={rightColor} />
 
-              {/* label: approach + queue count (L/S/R breakdown is in the status list below - no room for it here without colliding with the opposite approach's label) */}
-              <text x={sx} y={sy - 30} textAnchor="middle" className="fill-slate-300 text-[11px] font-semibold">
+              {/* label: approach + queue count (L/S/R breakdown is in the status list below - no room for it here) */}
+              <text x={textX} y={textY - 8} textAnchor="middle" className="fill-slate-300 text-[11px] font-semibold">
                 {approach} · {q}
               </text>
               {/* countdown / wait estimate */}
               <text
-                x={sx}
-                y={sy + 34}
+                x={textX}
+                y={textY + 8}
                 textAnchor="middle"
                 className={
                   isGreen
