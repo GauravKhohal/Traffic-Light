@@ -8,6 +8,13 @@ const MAX_SHOWN = 8 // cars drawn per approach even if the real queue is longer
 // single-colour block. Purely cosmetic, cycles by position in the queue.
 const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb923c']
 
+const LANE_OFFSET_PX = 9 // lateral gap between the left/straight/right sub-lanes
+const MAX_PER_TURN_LANE = 3 // left/right lanes shown at most this many, straight fills the rest
+
+function avg(a, b) {
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
+}
+
 // Estimated seconds until `targetIdx` next gets green, walking the fixed
 // N->E->S->W rotation from the currently-active approach (phase_index is
 // always the first active/transitioning approach, regardless of green/
@@ -48,8 +55,23 @@ const DIR = {
   W: { dx: -1, dy: 0 },
 }
 
-function Lamp({ cx, cy, color, lit }) {
-  return <circle cx={cx} cy={cy} r="5" fill={lit ? color : '#1e293b'} stroke="#0f172a" strokeWidth="1" />
+// A real signal head shows one lit arrow per movement currently allowed, not
+// a plain ball - a driver sees exactly which ways they may go. `ux,uy` is the
+// direction the arrow points; each movement's arrow is coloured independently
+// (e.g. a green straight arrow next to a red right arrow during a surge).
+function Arrow({ cx, cy, ux, uy, color, len = 7, halfW = 3 }) {
+  const tipX = cx + ux * len
+  const tipY = cy + uy * len
+  const baseX = cx - ux * len * 0.5
+  const baseY = cy - uy * len * 0.5
+  const px = -uy
+  const py = ux
+  const points = [
+    `${tipX},${tipY}`,
+    `${baseX + px * halfW},${baseY + py * halfW}`,
+    `${baseX - px * halfW},${baseY - py * halfW}`,
+  ].join(' ')
+  return <polygon points={points} fill={color} stroke="#0f172a" strokeWidth="1" strokeLinejoin="round" />
 }
 
 // One realistic-ish top-down intersection: roads, queued car icons per
@@ -100,88 +122,111 @@ export default function IntersectionView({ signal }) {
           // approaches but holds right; a solo green (1-letter code) opens both
           const isSurge = isGreen && phase.length === 2
           const rightGreen = isGreen && phase.length === 1
-          const mv = movements[approach]
+          const mv = movements[approach] || { L: 0, S: 0, R: 0 }
           const q = queues[approach] || 0
-          const shown = Math.min(MAX_SHOWN, q)
           const stopLineR = roadHalf + 4
 
-          // queued / flowing cars, nose pointed at the stop line
-          const cars = Array.from({ length: shown }, (_, i) => {
-            const r = stopLineR + 14 + i * 20
-            const vx = c + dx * r
-            const vy = c + dy * r
-            const w = vertical ? 20 : 30
-            const h = vertical ? 30 : 20
-            const color = CAR_COLORS[i % CAR_COLORS.length]
-            return (
-              <g
-                key={i}
-                className={isGreen ? 'vehicle-flowing' : ''}
-                style={isGreen ? { '--fx': -dx, '--fy': -dy, animationDelay: `${i * 160}ms` } : undefined}
-              >
-                <rect x={vx - w / 2} y={vy - h / 2} width={w} height={h} rx="5" fill={color} stroke="#0f172a" strokeWidth="1" />
-                {/* windshield, offset toward the direction of travel (nose) */}
-                <rect
-                  x={vx - (vertical ? w * 0.32 : h * 0.32) - (dx ? dx * w * 0.12 : 0)}
-                  y={vy - (vertical ? h * 0.32 : w * 0.32) - (dy ? dy * h * 0.12 : 0)}
-                  width={vertical ? w * 0.64 : h * 0.64}
-                  height={vertical ? h * 0.3 : w * 0.3}
-                  rx="2"
-                  fill="#0f172a"
-                  opacity="0.55"
-                />
-              </g>
-            )
+          // Left is always free-flowing; straight flows on a solo green or a
+          // paired surge; right only flows on this approach's own solo green
+          // (never during a surge) - see feeds.py. Each movement gets its own
+          // sub-lane (a lateral offset) and its own flow direction: straight
+          // continues through the intersection, left/right blend the through
+          // direction with a sideways component so a turning car visibly
+          // peels off instead of driving straight through.
+          const travel = { x: -dx, y: -dy }
+          const leftPerp = { x: travel.y, y: -travel.x }
+          const rightPerp = { x: -travel.y, y: travel.x }
+          const lanes = {
+            L: { count: mv.L, flowing: true, perp: leftPerp, flow: avg(travel, leftPerp), ring: '#22c55e' },
+            S: { count: mv.S, flowing: isGreen, perp: { x: 0, y: 0 }, flow: travel, ring: null },
+            R: { count: mv.R, flowing: rightGreen, perp: rightPerp, flow: avg(travel, rightPerp), ring: '#ef4444' },
+          }
+          const shownL = Math.min(MAX_PER_TURN_LANE, lanes.L.count)
+          const shownR = Math.min(MAX_PER_TURN_LANE, lanes.R.count)
+          const shownS = Math.min(Math.max(0, MAX_SHOWN - shownL - shownR), lanes.S.count)
+          const shownByLane = { L: shownL, S: shownS, R: shownR }
+
+          const w = vertical ? 20 : 30
+          const h = vertical ? 30 : 20
+
+          // queued / flowing cars, nose pointed at the stop line, one small
+          // group per movement so a viewer can see left cars peeling off
+          // while right cars sit still (held) and straight cars come through
+          let colorCursor = 0
+          const cars = ['L', 'S', 'R'].flatMap((key) => {
+            const lane = lanes[key]
+            const shown = shownByLane[key]
+            const group = Array.from({ length: shown }, (_, i) => {
+              const r = stopLineR + 14 + i * 22
+              const vx = c + dx * r + lane.perp.x * LANE_OFFSET_PX
+              const vy = c + dy * r + lane.perp.y * LANE_OFFSET_PX
+              const flowing = lane.flowing
+              const color = CAR_COLORS[colorCursor % CAR_COLORS.length]
+              colorCursor += 1
+              return (
+                <g
+                  key={`${key}-${i}`}
+                  className={flowing ? 'vehicle-flowing' : ''}
+                  style={flowing ? { '--fx': lane.flow.x, '--fy': lane.flow.y, animationDelay: `${i * 160}ms` } : undefined}
+                >
+                  <rect
+                    x={vx - w / 2}
+                    y={vy - h / 2}
+                    width={w}
+                    height={h}
+                    rx="5"
+                    fill={color}
+                    stroke={lane.ring ?? '#0f172a'}
+                    strokeWidth={lane.ring ? 2 : 1}
+                  />
+                  {/* windshield, offset toward the direction of travel (nose) */}
+                  <rect
+                    x={vx - (vertical ? w * 0.32 : h * 0.32) - (dx ? dx * w * 0.12 : 0)}
+                    y={vy - (vertical ? h * 0.32 : w * 0.32) - (dy ? dy * h * 0.12 : 0)}
+                    width={vertical ? w * 0.64 : h * 0.64}
+                    height={vertical ? h * 0.3 : w * 0.3}
+                    rx="2"
+                    fill="#0f172a"
+                    opacity="0.55"
+                  />
+                </g>
+              )
+            })
+            return group
           })
 
           // signal head just outside the stop line
           const sx = c + dx * (stopLineR - 2) + (vertical ? 18 : 0)
           const sy = c + dy * (stopLineR - 2) + (vertical ? 0 : 18)
-          // all-red (or any non-active approach) shows red; only the active
-          // approach ever shows yellow or green — this is the STRAIGHT signal
-          const redLit = !isGreen && !isYellow
-          // left and right sit either side of the main head (vertical
-          // approaches) or above/below it (horizontal approaches)
-          const lOffset = vertical ? { x: -16, y: 0 } : { x: 0, y: -16 }
-          const rOffset = vertical ? { x: 16, y: 0 } : { x: 0, y: 16 }
-
           const eta = etaSeconds(signal, approachIdx)
+
+          // One arrow per movement, each independently coloured red/amber/
+          // green for what it's actually doing right now - not a plain ball.
+          // Left is always green (free-flowing, every phase). Straight is
+          // green on a solo green or a paired surge, amber while its own
+          // green is ending. Right is only ever green on a solo green (never
+          // during a surge, where it's held) and only ambers if it was
+          // actually running before this yellow, not if it was already held.
+          const soloActive = isActive && active.length === 1
+          const straightColor = isGreen ? '#22c55e' : isYellow ? '#f59e0b' : '#ef4444'
+          const rightColor = rightGreen ? '#22c55e' : isYellow && soloActive ? '#f59e0b' : '#ef4444'
+          const CLUSTER_GAP = 6
+          const straightAnchor = { x: sx + travel.x * 2, y: sy + travel.y * 2 }
+          const leftAnchor = { x: sx + leftPerp.x * CLUSTER_GAP, y: sy + leftPerp.y * CLUSTER_GAP }
+          const rightAnchor = { x: sx + rightPerp.x * CLUSTER_GAP, y: sy + rightPerp.y * CLUSTER_GAP }
 
           return (
             <g key={approach}>
               {cars}
-              {/* signal head box (straight movement) */}
-              <rect x={sx - 8} y={sy - 20} width="16" height="40" rx="3" fill="#0b1220" stroke="#334155" />
-              <Lamp cx={sx} cy={sy - 12} color="#ef4444" lit={redLit} />
-              <Lamp cx={sx} cy={sy} color="#f59e0b" lit={isYellow} />
-              <Lamp cx={sx} cy={sy + 12} color="#22c55e" lit={isGreen} />
+              {/* signal head housing */}
+              <rect x={sx - 15} y={sy - 15} width="30" height="30" rx="6" fill="#0b1220" stroke="#334155" />
+              <Arrow cx={leftAnchor.x} cy={leftAnchor.y} ux={leftPerp.x} uy={leftPerp.y} color="#22c55e" />
+              <Arrow cx={straightAnchor.x} cy={straightAnchor.y} ux={travel.x} uy={travel.y} color={straightColor} />
+              <Arrow cx={rightAnchor.x} cy={rightAnchor.y} ux={rightPerp.x} uy={rightPerp.y} color={rightColor} />
 
-              {/* left: always free-flowing, every approach, every phase */}
-              <Lamp cx={sx + lOffset.x} cy={sy + lOffset.y} color="#22c55e" lit />
-              <text
-                x={sx + lOffset.x}
-                y={sy + lOffset.y + 13}
-                textAnchor="middle"
-                className="fill-emerald-500 text-[8px] font-bold"
-              >
-                L
-              </text>
-
-              {/* right: held during a paired straight-only surge */}
-              <Lamp cx={sx + rOffset.x} cy={sy + rOffset.y} color={rightGreen ? '#22c55e' : '#ef4444'} lit />
-              <text
-                x={sx + rOffset.x}
-                y={sy + rOffset.y + 13}
-                textAnchor="middle"
-                className={rightGreen ? 'fill-emerald-500 text-[8px] font-bold' : 'fill-red-500 text-[8px] font-bold'}
-              >
-                R
-              </text>
-
-              {/* label: approach + queue count (+ L/S/R breakdown when known) */}
+              {/* label: approach + queue count (L/S/R breakdown is in the status list below - no room for it here without colliding with the opposite approach's label) */}
               <text x={sx} y={sy - 30} textAnchor="middle" className="fill-slate-300 text-[11px] font-semibold">
                 {approach} · {q}
-                {mv ? ` (L${mv.L}·S${mv.S}·R${mv.R})` : ''}
               </text>
               {/* countdown / wait estimate */}
               <text
@@ -198,7 +243,7 @@ export default function IntersectionView({ signal }) {
               >
                 {isGreen
                   ? isSurge
-                    ? `STRAIGHT ${countdown}s (R held)`
+                    ? `STRAIGHT ${countdown}s`
                     : `GREEN ${countdown}s`
                   : isYellow
                     ? `YELLOW ${countdown}s`
