@@ -32,14 +32,13 @@ QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how lon
 LEFT_SHARE = 0.15
 RIGHT_SHARE = 0.20
 
-# Opposing-approach pairs, keyed by the rotation index that starts them
-# (N->E->S->W order: N=0, E=1, S=2, W=3). When both members of a pair are
-# individually congested, a "surge" phase runs their straight movements
-# together instead of serving them one at a time - the requested behaviour:
-# high traffic on North and South both -> both get green for straight
-# traffic simultaneously, right turns from either hold until their own
-# later solo green.
-SURGE_PAIRS = {0: (0, 2), 1: (1, 3)}
+# N->E->S->W rotation order: N=0, E=1, S=2, W=3. When both members of an
+# opposing pair (N+S or E+W) are individually congested, a "surge" phase runs
+# their straight movements together instead of serving them one at a time -
+# the requested behaviour: high traffic on North and South both -> both get
+# green for straight traffic simultaneously, right turns from either hold
+# until their own later solo green. Checked against whichever pair the
+# rotation is about to serve next, whether that's the N/E or the S/W half.
 SURGE_TRIGGER_S = 6  # per-approach straight-queue level that counts as "high"
 SURGE_GREEN_S = 20  # duration of a paired straight-only surge phase
 
@@ -248,10 +247,13 @@ class DemoFeed:
                                 break
                             nxt = (nxt + 1) % 4
 
-                    pair = SURGE_PAIRS.get(nxt)
+                    # whichever approach is up next, check ITS pair - not just
+                    # whichever pair happens to start at index 0/1 - so N/S
+                    # both being busy triggers a surge whether the rotation
+                    # was about to serve N or S next (same for E/W)
+                    pair = (0, 2) if nxt in (0, 2) else (1, 3)
                     if (
                         override_idx is None
-                        and pair is not None
                         and all(s["queues"][i]["S"] >= SURGE_TRIGGER_S for i in pair)
                     ):
                         # both opposing approaches are congested on their
@@ -261,11 +263,11 @@ class DemoFeed:
                         s["kind"] = "surge"
                         s["active"] = list(pair)
                         s["countdown"] = SURGE_GREEN_S
-                        # park "route" one step behind the pair's leading
-                        # approach so the very next solo green (which clears
-                        # the right turns the surge held) is that approach,
-                        # not a full lap away
-                        s["route"] = (pair[0] - 1) % 4
+                        # park "route" one step behind the approach that was
+                        # about to run solo, so the very next solo green
+                        # (which clears the right turns the surge held) is
+                        # that same approach, not a full lap away
+                        s["route"] = (nxt - 1) % 4
                     else:
                         s["route"] = nxt
                         s["kind"] = "green"

@@ -255,6 +255,30 @@ def test_high_traffic_on_opposing_approaches_triggers_straight_surge():
     assert s["queues"][2]["R"] == s_r_before
 
 
+def test_surge_triggers_when_rotation_lands_on_the_trailing_pair_member():
+    # regression: the rotation coming from E (not W) means "next" naturally
+    # lands on S, not N. Both N and S are still congested, so the surge must
+    # still fire - it shouldn't only trigger when N happens to be picked.
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=10)
+    s = feed.sig["B1"]
+    s["queues"] = [
+        mv(s=SURGE_TRIGGER_S + 2),  # N
+        mv(s=1),  # E - just finished, low leftover
+        mv(s=SURGE_TRIGGER_S + 2),  # S
+        mv(),  # W
+    ]
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 1  # E was serving -> next is (1+1)%4 = 2 = S, not N
+    s["kind"] = "allred"
+    s["active"] = [1]
+    s["countdown"] = 1
+    feed._tick_signal("B1")
+    assert s["kind"] == "surge"
+    assert set(s["active"]) == {0, 2}
+
+
 def test_fixed_mode_never_surges():
     store = StateStore()
     store.set_mode("fixed")
