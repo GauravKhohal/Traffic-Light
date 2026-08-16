@@ -1,4 +1,4 @@
-import { APPROACHES, phaseColor, phaseLabel } from '../constants'
+import { APPROACHES, activeApproaches, isGreenPhase, phaseColor, phaseLabel } from '../constants'
 
 // Green time (s) coloured relative to the 30s base: boosted = emerald, trimmed = dim.
 function greenStyle(g) {
@@ -15,6 +15,8 @@ export default function SignalCard({ signal, selected, onSelect, onOverride }) {
   const { id, queues = {}, greens = {}, phase, countdown, override } = signal
   const maxQ = Math.max(8, ...APPROACHES.map((a) => queues[a] || 0))
   const hasGreens = Object.keys(greens).length > 0
+  const active = activeApproaches(signal)
+  const isSurge = isGreenPhase(phase) && phase.length === 2
 
   return (
     <div
@@ -38,6 +40,12 @@ export default function SignalCard({ signal, selected, onSelect, onOverride }) {
         {override && <span className="ml-2 text-purple-400">override {override}</span>}
       </div>
 
+      {isSurge && (
+        <div className="mt-2 rounded bg-emerald-950/60 px-2 py-1 text-[11px] font-medium text-emerald-400">
+          High traffic: {phase[0]}+{phase[1]} run straight together, right turns held
+        </div>
+      )}
+
       <div className="mt-2 grid grid-cols-[0.9rem_1fr_1.3rem_2.4rem] items-center gap-x-2 text-[11px] text-slate-500">
         <span></span>
         <span>queue</span>
@@ -48,7 +56,7 @@ export default function SignalCard({ signal, selected, onSelect, onOverride }) {
         {APPROACHES.map((a) => {
           const q = queues[a] || 0
           const g = hasGreens ? greens[a] : null
-          const isGreen = phase === a
+          const isGreen = active.includes(a) && isGreenPhase(phase)
           return (
             <div key={a} className="grid grid-cols-[0.9rem_1fr_1.3rem_2.4rem] items-center gap-x-2">
               <span className="text-xs text-slate-400">{a}</span>

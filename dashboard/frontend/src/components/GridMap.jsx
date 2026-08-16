@@ -1,4 +1,4 @@
-import { queueColor } from '../constants'
+import { activeApproaches, isGreenPhase, queueColor } from '../constants'
 
 // screen-direction unit vectors for each nominal approach (outward from node)
 const DIR = {
@@ -42,11 +42,12 @@ export default function GridMap({ signals, selected, onSelect }) {
           const queues = s.queues || {}
           const total = Object.values(queues).reduce((a, b) => a + b, 0)
           const isSel = s.id === selected
+          const active = activeApproaches(s)
           return (
             <g key={s.id}>
               {Object.entries(DIR).map(([approach, { dx, dy }]) => {
                 const n = Math.min(MAX_SHOWN, queues[approach] || 0)
-                const isFlowing = s.phase === approach
+                const isFlowing = active.includes(approach) && isGreenPhase(s.phase)
                 const vertical = dx === 0
                 return Array.from({ length: n }, (_, i) => {
                   const r = 17 + i * 6.5 // 0 = closest to the stop line

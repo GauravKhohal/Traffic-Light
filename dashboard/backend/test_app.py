@@ -11,8 +11,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from fastapi.testclient import TestClient
 
-from feeds import SIGNAL_IDS, DemoFeed
+from feeds import SIGNAL_IDS, SURGE_GREEN_S, SURGE_TRIGGER_S, DemoFeed
 from state_store import APPROACH_LABELS, StateStore, grid_position
+
+
+def mv(s=0, l=0, r=0):
+    """Build a movement queue dict — helper for tests that used to poke a
+    flat int queue and now need the {L, S, R} split."""
+    return {"L": l, "S": s, "R": r}
 
 
 def test_grid_position():
@@ -34,6 +40,10 @@ def test_demo_feed_populates_all_signals():
         assert all(15 <= g <= 60 for g in s["greens"].values())
         assert "phase" in s and "countdown" in s
         assert "x" in s and "y" in s
+        assert set(s["movements"]) == set(APPROACH_LABELS)
+        for m in s["movements"].values():
+            assert set(m) == {"L", "S", "R"}
+        assert s["active"], "always at least one approach in the spotlight"
     assert len(store.history()) == 5
 
 
@@ -80,7 +90,7 @@ def test_fixed_mode_ignores_demand():
     store.set_mode("fixed")
     feed = DemoFeed(store, seed=4)
     # force one approach heavily busy, others empty
-    feed.sig["B1"]["queues"] = [22, 0, 0, 0]
+    feed.sig["B1"]["queues"] = [mv(s=22), mv(), mv(), mv()]
     feed.sig["B1"]["rates"] = [0.0, 0.0, 0.0, 0.0]  # freeze arrivals
     for _ in range(400):
         feed._tick_signal("B1")
@@ -93,10 +103,11 @@ def test_ai_mode_reacts_to_demand_and_skips_empty():
     store = StateStore()
     store.set_mode("ai")
     feed = DemoFeed(store, seed=4)
-    feed.sig["B1"]["queues"] = [22, 0, 0, 0]
+    feed.sig["B1"]["queues"] = [mv(s=22), mv(), mv(), mv()]
     feed.sig["B1"]["rates"] = [0.0, 0.0, 0.0, 0.0]
     feed.sig["B1"]["route"] = 1  # currently serving the empty E approach
     feed.sig["B1"]["kind"] = "green"
+    feed.sig["B1"]["active"] = [1]
     feed.sig["B1"]["countdown"] = 1
     for _ in range(20):
         feed._tick_signal("B1")
@@ -112,10 +123,11 @@ def test_ai_mode_gapout_ends_empty_green_early():
     store.set_mode("ai")
     feed = DemoFeed(store, seed=6)
     s = feed.sig["B1"]
-    s["queues"] = [0, 22, 0, 0]  # currently-served approach just drained; E is heavy
+    s["queues"] = [mv(), mv(s=22), mv(), mv()]  # currently-served approach just drained; E is heavy
     s["rates"] = [0.0, 0.0, 0.0, 0.0]  # freeze arrivals so the queue can't refill
     s["route"] = 0
     s["kind"] = "green"
+    s["active"] = [0]
     s["greens"] = [30, 30, 30, 30]
     s["countdown"] = 24  # elapsed = 30-24 = 6s, past the 5s minimum
     feed._tick_signal("B1")
@@ -127,10 +139,11 @@ def test_ai_mode_no_gapout_before_min_green():
     store.set_mode("ai")
     feed = DemoFeed(store, seed=6)
     s = feed.sig["B1"]
-    s["queues"] = [0, 22, 0, 0]
+    s["queues"] = [mv(), mv(s=22), mv(), mv()]
     s["rates"] = [0.0, 0.0, 0.0, 0.0]
     s["route"] = 0
     s["kind"] = "green"
+    s["active"] = [0]
     s["greens"] = [30, 30, 30, 30]
     s["countdown"] = 27  # elapsed = 3s, under the 5s minimum
     feed._tick_signal("B1")
@@ -142,10 +155,11 @@ def test_fixed_mode_never_gaps_out():
     store.set_mode("fixed")
     feed = DemoFeed(store, seed=6)
     s = feed.sig["B1"]
-    s["queues"] = [0, 22, 0, 0]
+    s["queues"] = [mv(), mv(s=22), mv(), mv()]
     s["rates"] = [0.0, 0.0, 0.0, 0.0]
     s["route"] = 0
     s["kind"] = "green"
+    s["active"] = [0]
     s["greens"] = [30, 30, 30, 30]
     s["countdown"] = 10  # well past the AI minimum, but fixed mode never gaps out
     feed._tick_signal("B1")
@@ -180,19 +194,81 @@ def test_discharge_propagates_to_downstream_neighbor():
     store.set_mode("ai")
     feed = DemoFeed(store, seed=2)
     b1 = feed.sig["B1"]
-    b1["queues"] = [5, 0, 0, 0]  # N approach has demand
+    b1["queues"] = [mv(s=5), mv(), mv(), mv()]  # N approach has straight demand
     b1["rates"] = [0.0, 0.0, 0.0, 0.0]
     b1["route"] = 0
     b1["kind"] = "green"
+    b1["active"] = [0]
     b1["greens"] = [30, 30, 30, 30]
     b1["countdown"] = 20
     feed.sig["B0"]["rates"] = [0.0, 0.0, 0.0, 0.0]  # isolate: only propagation can grow it
     feed.sig["B0"]["kind"] = "allred"  # not currently discharging anything itself
     feed.sig["B0"]["countdown"] = 100
-    before = feed.sig["B0"]["queues"][0]  # B0's N-approach queue
+    before = sum(feed.sig["B0"]["queues"][0].values())  # B0's N-approach queue
     feed._tick()
-    after = feed.sig["B0"]["queues"][0]
+    after = sum(feed.sig["B0"]["queues"][0].values())
     assert after > before, "B1's N-approach discharge should arrive at B0's N-approach queue"
+
+
+def test_left_always_flows_even_while_red():
+    store = StateStore()
+    store.set_mode("fixed")
+    feed = DemoFeed(store, seed=7)
+    s = feed.sig["B1"]
+    s["queues"] = [mv(l=3), mv(), mv(), mv()]  # N has only left-turn demand
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 1  # E is green, N (with the left queue) is red
+    s["kind"] = "green"
+    s["active"] = [1]
+    s["countdown"] = 30
+    feed._tick_signal("B1")
+    assert s["queues"][0]["L"] == 2, "a red approach's left turn still clears one vehicle a tick"
+
+
+def test_high_traffic_on_opposing_approaches_triggers_straight_surge():
+    store = StateStore()
+    store.set_mode("ai")
+    feed = DemoFeed(store, seed=8)
+    s = feed.sig["B1"]
+    # both N and S are heavy on straight traffic; E/W empty
+    s["queues"] = [
+        mv(s=SURGE_TRIGGER_S + 5, r=4),
+        mv(),
+        mv(s=SURGE_TRIGGER_S + 3, r=2),
+        mv(),
+    ]
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 3  # about to roll over to N (index 0), which starts the N/S pair
+    s["kind"] = "allred"
+    s["active"] = [3]
+    s["countdown"] = 1
+    feed._tick_signal("B1")
+    assert s["kind"] == "surge"
+    assert set(s["active"]) == {0, 2}
+    assert s["countdown"] == SURGE_GREEN_S
+
+    # right turns are held during the surge: only S drains, R is untouched
+    n_r_before, s_r_before = s["queues"][0]["R"], s["queues"][2]["R"]
+    for _ in range(3):
+        feed._tick_signal("B1")
+    assert s["queues"][0]["R"] == n_r_before
+    assert s["queues"][2]["R"] == s_r_before
+
+
+def test_fixed_mode_never_surges():
+    store = StateStore()
+    store.set_mode("fixed")
+    feed = DemoFeed(store, seed=9)
+    s = feed.sig["B1"]
+    s["queues"] = [mv(s=SURGE_TRIGGER_S + 5), mv(), mv(s=SURGE_TRIGGER_S + 5), mv()]
+    s["rates"] = [0.0, 0.0, 0.0, 0.0]
+    s["route"] = 3
+    s["kind"] = "allred"
+    s["active"] = [3]
+    s["countdown"] = 1
+    feed._tick_signal("B1")
+    assert s["kind"] == "green"  # plain round robin, no surge in fixed mode
+    assert s["active"] == [0]
 
 
 def test_rest_and_websocket_endpoints():

@@ -1,4 +1,4 @@
-import { APPROACHES } from '../constants'
+import { APPROACHES, activeApproaches, isGreenPhase } from '../constants'
 
 const YELLOW_S = 4
 const ALLRED_S = 2
@@ -10,18 +10,20 @@ const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb9
 
 // Estimated seconds until `targetIdx` next gets green, walking the fixed
 // N->E->S->W rotation from the currently-active approach (phase_index is
-// always the active/transitioning approach, regardless of green/yellow/
-// all-red). Mirrors the backend's skip-empty-approach behaviour: an approach
-// with zero queued vehicles right now is assumed to be skipped entirely (no
-// time added), so a busy approach's estimate reflects that it's promoted
-// ahead of empty ones rather than waiting through them. Returns null only if
-// the feed hasn't sent usable data yet.
+// always the first active/transitioning approach, regardless of green/
+// yellow/all-red). Mirrors the backend's skip-empty-approach behaviour: an
+// approach with zero queued vehicles right now is assumed to be skipped
+// entirely (no time added), so a busy approach's estimate reflects that it's
+// promoted ahead of empty ones rather than waiting through them. Does not
+// account for a high-traffic surge that might get inserted along the way
+// (that depends on future queue levels), so this is an approximation during
+// AI mode. Returns null only if the feed hasn't sent usable data yet.
 function etaSeconds(signal, targetIdx) {
   const { phase_index: active, countdown, greens = {}, queues = {} } = signal
   if (active == null || active < 0 || countdown == null) return null
   const kind = signal.phase
-  const isGreenNow = APPROACHES.includes(kind)
-  if (isGreenNow && active === targetIdx) return 0
+  const isGreenNow = isGreenPhase(kind)
+  if (isGreenNow && activeApproaches(signal).includes(APPROACHES[targetIdx])) return 0
 
   // seconds remaining until the NEXT approach in rotation starts its green
   let t
@@ -63,8 +65,9 @@ export default function IntersectionView({ signal }) {
     )
   }
 
-  const { id, queues = {}, greens = {}, phase, phase_index: activeIdx, countdown } = signal
-  const isGreenNow = APPROACHES.includes(phase)
+  const { id, queues = {}, movements = {}, greens = {}, phase, countdown } = signal
+  const active = activeApproaches(signal)
+  const isGreenNow = isGreenPhase(phase)
   const size = 420
   const c = size / 2
   const roadHalf = 40 // half-width of each road surface
@@ -90,9 +93,14 @@ export default function IntersectionView({ signal }) {
         {Object.entries(DIR).map(([approach, { dx, dy }]) => {
           const vertical = dx === 0
           const approachIdx = APPROACHES.indexOf(approach)
-          const isActive = approachIdx === activeIdx
+          const isActive = active.includes(approach)
           const isGreen = isActive && isGreenNow
           const isYellow = isActive && phase === 'yellow'
+          // a surge (2-letter phase code) opens straight for both paired
+          // approaches but holds right; a solo green (1-letter code) opens both
+          const isSurge = isGreen && phase.length === 2
+          const rightGreen = isGreen && phase.length === 1
+          const mv = movements[approach]
           const q = queues[approach] || 0
           const shown = Math.min(MAX_SHOWN, q)
           const stopLineR = roadHalf + 4
@@ -130,22 +138,50 @@ export default function IntersectionView({ signal }) {
           const sx = c + dx * (stopLineR - 2) + (vertical ? 18 : 0)
           const sy = c + dy * (stopLineR - 2) + (vertical ? 0 : 18)
           // all-red (or any non-active approach) shows red; only the active
-          // approach ever shows yellow or green
+          // approach ever shows yellow or green — this is the STRAIGHT signal
           const redLit = !isGreen && !isYellow
+          // left and right sit either side of the main head (vertical
+          // approaches) or above/below it (horizontal approaches)
+          const lOffset = vertical ? { x: -16, y: 0 } : { x: 0, y: -16 }
+          const rOffset = vertical ? { x: 16, y: 0 } : { x: 0, y: 16 }
 
           const eta = etaSeconds(signal, approachIdx)
 
           return (
             <g key={approach}>
               {cars}
-              {/* signal head box */}
+              {/* signal head box (straight movement) */}
               <rect x={sx - 8} y={sy - 20} width="16" height="40" rx="3" fill="#0b1220" stroke="#334155" />
               <Lamp cx={sx} cy={sy - 12} color="#ef4444" lit={redLit} />
               <Lamp cx={sx} cy={sy} color="#f59e0b" lit={isYellow} />
               <Lamp cx={sx} cy={sy + 12} color="#22c55e" lit={isGreen} />
-              {/* label: approach + queue count */}
+
+              {/* left: always free-flowing, every approach, every phase */}
+              <Lamp cx={sx + lOffset.x} cy={sy + lOffset.y} color="#22c55e" lit />
+              <text
+                x={sx + lOffset.x}
+                y={sy + lOffset.y + 13}
+                textAnchor="middle"
+                className="fill-emerald-500 text-[8px] font-bold"
+              >
+                L
+              </text>
+
+              {/* right: held during a paired straight-only surge */}
+              <Lamp cx={sx + rOffset.x} cy={sy + rOffset.y} color={rightGreen ? '#22c55e' : '#ef4444'} lit />
+              <text
+                x={sx + rOffset.x}
+                y={sy + rOffset.y + 13}
+                textAnchor="middle"
+                className={rightGreen ? 'fill-emerald-500 text-[8px] font-bold' : 'fill-red-500 text-[8px] font-bold'}
+              >
+                R
+              </text>
+
+              {/* label: approach + queue count (+ L/S/R breakdown when known) */}
               <text x={sx} y={sy - 30} textAnchor="middle" className="fill-slate-300 text-[11px] font-semibold">
                 {approach} · {q}
+                {mv ? ` (L${mv.L}·S${mv.S}·R${mv.R})` : ''}
               </text>
               {/* countdown / wait estimate */}
               <text
@@ -160,7 +196,15 @@ export default function IntersectionView({ signal }) {
                       : 'fill-slate-500 text-[10px]'
                 }
               >
-                {isGreen ? `GREEN ${countdown}s` : isYellow ? `YELLOW ${countdown}s` : eta != null ? `wait ~${eta}s` : 'waiting'}
+                {isGreen
+                  ? isSurge
+                    ? `STRAIGHT ${countdown}s (R held)`
+                    : `GREEN ${countdown}s`
+                  : isYellow
+                    ? `YELLOW ${countdown}s`
+                    : eta != null
+                      ? `wait ~${eta}s`
+                      : 'waiting'}
               </text>
             </g>
           )
@@ -178,7 +222,7 @@ export default function IntersectionView({ signal }) {
         ))}
       </div>
 
-      <StatusList signal={signal} activeIdx={activeIdx} isGreenNow={isGreenNow} phase={phase} countdown={countdown} />
+      <StatusList signal={signal} active={active} isGreenNow={isGreenNow} phase={phase} countdown={countdown} />
     </div>
   )
 }
@@ -186,17 +230,20 @@ export default function IntersectionView({ signal }) {
 // Unambiguous, plain-text readout — one row per approach, in the order it
 // will actually be served, so there's no small overlapping SVG text to
 // misread. This is the same eta/skip logic as the diagram, just spelled out.
-function StatusList({ signal, activeIdx, isGreenNow, phase, countdown }) {
-  const { queues = {} } = signal
+function StatusList({ signal, active, isGreenNow, phase, countdown }) {
+  const { queues = {}, movements = {} } = signal
+  const isSurge = isGreenNow && phase.length === 2
   const rows = APPROACHES.map((a, i) => {
     const q = queues[a] || 0
-    const isActive = i === activeIdx
+    const isActive = active.includes(a)
     return {
       approach: a,
       queue: q,
+      mv: movements[a],
       isActive,
       isGreen: isActive && isGreenNow,
       isYellow: isActive && phase === 'yellow',
+      rightHeld: isActive && isGreenNow && isSurge,
       eta: isActive ? 0 : etaSeconds(signal, i),
     }
   })
@@ -204,6 +251,11 @@ function StatusList({ signal, activeIdx, isGreenNow, phase, countdown }) {
 
   return (
     <div className="mt-3 divide-y divide-slate-800 rounded-lg bg-slate-800/40 text-sm">
+      {isSurge && (
+        <div className="px-3 py-1.5 text-xs font-semibold text-emerald-400">
+          High traffic on {phase[0]} + {phase[1]}: both run straight together, right turns held
+        </div>
+      )}
       {rows.map((r) => (
         <div key={r.approach} className="flex items-center justify-between px-3 py-1.5">
           <span className="flex items-center gap-2">
@@ -213,11 +265,16 @@ function StatusList({ signal, activeIdx, isGreenNow, phase, countdown }) {
               }`}
             />
             <span className="font-semibold">{r.approach}</span>
-            <span className="text-slate-400">· {r.queue} car{r.queue === 1 ? '' : 's'}</span>
+            <span className="text-slate-400">
+              · {r.queue} car{r.queue === 1 ? '' : 's'}
+              {r.mv ? ` (L${r.mv.L} · S${r.mv.S} · R${r.mv.R})` : ''}
+            </span>
           </span>
           <span className={r.isGreen ? 'font-semibold text-emerald-400' : r.isYellow ? 'text-amber-400' : 'text-slate-400'}>
             {r.isGreen
-              ? `GREEN, ${countdown}s left`
+              ? r.rightHeld
+                ? `STRAIGHT, ${countdown}s left (right held)`
+                : `GREEN, ${countdown}s left`
               : r.isYellow
                 ? `yellow, ${countdown}s`
                 : r.queue === 0
@@ -226,6 +283,9 @@ function StatusList({ signal, activeIdx, isGreenNow, phase, countdown }) {
           </span>
         </div>
       ))}
+      <div className="px-3 py-1.5 text-xs text-slate-500">
+        Left turns flow continuously on every approach — never held by the signal.
+      </div>
     </div>
   )
 }

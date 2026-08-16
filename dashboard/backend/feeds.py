@@ -24,6 +24,29 @@ ALLRED_S = 2
 GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
 QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how long it runs
 
+# Per-approach traffic is split into three movements. Left never needs the
+# signal at all - it is free-flowing on every approach, every phase (the
+# "all left had to be green" rule). Right conflicts with the opposing
+# approach's through movement, so it is only released during that approach's
+# own solo green, never during a paired straight-only surge (below).
+LEFT_SHARE = 0.15
+RIGHT_SHARE = 0.20
+
+# Opposing-approach pairs, keyed by the rotation index that starts them
+# (N->E->S->W order: N=0, E=1, S=2, W=3). When both members of a pair are
+# individually congested, a "surge" phase runs their straight movements
+# together instead of serving them one at a time - the requested behaviour:
+# high traffic on North and South both -> both get green for straight
+# traffic simultaneously, right turns from either hold until their own
+# later solo green.
+SURGE_PAIRS = {0: (0, 2), 1: (1, 3)}
+SURGE_TRIGGER_S = 6  # per-approach straight-queue level that counts as "high"
+SURGE_GREEN_S = 20  # duration of a paired straight-only surge phase
+
+
+def _total(q):
+    return q["L"] + q["S"] + q["R"]
+
 # Grid-coordinate step (col, row) toward the neighbour that FEEDS each
 # approach: e.g. a signal's "N" queue is fed by the neighbour one row north
 # (vehicles heading south), and that signal's own N-approach discharge
@@ -96,9 +119,12 @@ class DemoFeed:
         for sid in SIGNAL_IDS:
             self.sig[sid] = {
                 "route": 0,
-                "kind": "green",
+                "kind": "green",  # green | surge | yellow | allred
+                "active": [0],  # approach indices in the current spotlight (2 during a surge)
                 "countdown": GREEN_BASE,
-                "queues": [self.rng.randint(0, 6) for _ in range(4)],
+                "queues": [
+                    {"L": 0, "S": self.rng.randint(0, 6), "R": 0} for _ in range(4)
+                ],
                 "greens": [GREEN_BASE] * 4,
                 "rates": self._new_rates(sid),
             }
@@ -132,70 +158,143 @@ class DemoFeed:
 
         # local arrivals: fringe approaches get real random demand from
         # outside the grid; interior approaches only a small trickle, since
-        # their real traffic arrives via _tick()'s neighbour propagation
+        # their real traffic arrives via _tick()'s neighbour propagation.
+        # Each arrival is assigned a movement (left/straight/right) so the
+        # signal can treat them differently below.
         for i in range(4):
             if self.rng.random() < s["rates"][i]:
-                s["queues"][i] = min(QUEUE_CAP, s["queues"][i] + 1)
+                q = s["queues"][i]
+                if _total(q) < QUEUE_CAP:
+                    roll = self.rng.random()
+                    if roll < LEFT_SHARE:
+                        q["L"] += 1
+                    elif roll < LEFT_SHARE + RIGHT_SHARE:
+                        q["R"] += 1
+                    else:
+                        q["S"] += 1
 
+        # free left: every approach's left queue discharges every tick,
+        # independent of phase and of fixed/AI mode - a left turn is never
+        # held at this intersection.
+        for i in range(4):
+            q = s["queues"][i]
+            d = min(q["L"], 1)
+            if d:
+                q["L"] -= d
+                self.store.record_served(d)
+
+        # straight-through discharge only (what continues into a downstream
+        # neighbour's matching approach); left/right exit to a perpendicular
+        # street not modelled by this simplified grid.
         discharged = {a: 0 for a in APPROACH_LABELS}
-        if s["kind"] == "green":
-            served = s["route"]
-            discharge = min(s["queues"][served], self.rng.choice([1, 1, 2, 2]))
-            s["queues"][served] -= discharge
-            if discharge:
-                self.store.record_served(discharge)
-                discharged[APPROACH_LABELS[served]] = discharge
-            # a manual override to a different approach forces an early switch
-            if override_idx is not None and override_idx != served:
+        active = s["active"]
+        if s["kind"] in ("green", "surge"):
+            for idx in active:
+                q = s["queues"][idx]
+                s_amt = min(q["S"], self.rng.choice([1, 1, 2, 2]))
+                q["S"] -= s_amt
+                if s_amt:
+                    self.store.record_served(s_amt)
+                    discharged[APPROACH_LABELS[idx]] = s_amt
+                if s["kind"] == "green":
+                    # solo green also clears this approach's right-turn queue;
+                    # a surge never does - right holds until its own solo turn
+                    r_amt = min(q["R"], self.rng.choice([1, 1, 2, 2]))
+                    q["R"] -= r_amt
+                    if r_amt:
+                        self.store.record_served(r_amt)
+
+            if override_idx is not None and override_idx not in active:
+                # a manual override to a different approach forces an early switch
                 s["countdown"] = 0
             elif ai and override_idx is None:
-                # gap-out: this approach's own queue just drained and another
-                # approach has traffic waiting - end the green now instead of
-                # burning the rest of its planned time on an empty lane
-                elapsed = s["greens"][served] - s["countdown"]
-                others_waiting = any(q > 0 for i, q in enumerate(s["queues"]) if i != served)
-                if s["queues"][served] == 0 and others_waiting and elapsed >= MIN_GREEN_BEFORE_GAPOUT_S:
-                    s["countdown"] = 0
+                if s["kind"] == "green":
+                    # gap-out: this approach's own queues just drained and
+                    # another approach has traffic waiting - end the green
+                    # now instead of burning the rest of its planned time
+                    served = active[0]
+                    q = s["queues"][served]
+                    elapsed = s["greens"][served] - s["countdown"]
+                    others_waiting = any(
+                        _total(qq) - qq["L"] > 0 for i, qq in enumerate(s["queues"]) if i != served
+                    )
+                    if q["S"] == 0 and q["R"] == 0 and others_waiting and elapsed >= MIN_GREEN_BEFORE_GAPOUT_S:
+                        s["countdown"] = 0
+                else:  # surge gap-out: both paired straight queues have drained
+                    elapsed = SURGE_GREEN_S - s["countdown"]
+                    if all(s["queues"][i]["S"] == 0 for i in active) and elapsed >= MIN_GREEN_BEFORE_GAPOUT_S:
+                        s["countdown"] = 0
 
         s["countdown"] -= 1
         if s["countdown"] <= 0:
-            if s["kind"] == "green":
+            if s["kind"] in ("green", "surge"):
                 s["kind"], s["countdown"] = "yellow", YELLOW_S
             elif s["kind"] == "yellow":
                 s["kind"], s["countdown"] = "allred", ALLRED_S
-            else:  # all-red -> next green
+            else:  # all-red -> next phase
+                demand = [q["S"] + q["R"] for q in s["queues"]]  # left never needs green
                 if ai:
                     # AI mode: demand-proportional green (spec formula), and
                     # skip straight past any approach with zero queued
                     # vehicles instead of wasting a turn on it (up to 3
                     # skips, so it always terminates)
-                    s["greens"] = plan_greens(s["queues"])
+                    s["greens"] = plan_greens(demand)
                     if override_idx is not None:
                         nxt = override_idx
                     else:
                         nxt = (s["route"] + 1) % 4
                         for _ in range(3):
-                            if s["queues"][nxt] > 0:
+                            if demand[nxt] > 0:
                                 break
                             nxt = (nxt + 1) % 4
+
+                    pair = SURGE_PAIRS.get(nxt)
+                    if (
+                        override_idx is None
+                        and pair is not None
+                        and all(s["queues"][i]["S"] >= SURGE_TRIGGER_S for i in pair)
+                    ):
+                        # both opposing approaches are congested on their
+                        # straight movement: run them together instead of
+                        # one at a time, right turns wait for their own solo
+                        # green later in the rotation
+                        s["kind"] = "surge"
+                        s["active"] = list(pair)
+                        s["countdown"] = SURGE_GREEN_S
+                        # park "route" one step behind the pair's leading
+                        # approach so the very next solo green (which clears
+                        # the right turns the surge held) is that approach,
+                        # not a full lap away
+                        s["route"] = (pair[0] - 1) % 4
+                    else:
+                        s["route"] = nxt
+                        s["kind"] = "green"
+                        s["active"] = [nxt]
+                        s["countdown"] = s["greens"][nxt]
                 else:
                     # fixed mode: the "general" behaviour every uncontrolled
                     # intersection runs today - plain round robin, ignores
-                    # queue length entirely, always the base 30s
+                    # queue length and never surges, always the base 30s
                     s["greens"] = [GREEN_BASE] * 4
                     nxt = override_idx if override_idx is not None else (s["route"] + 1) % 4
-                s["route"] = nxt
-                s["kind"] = "green"
-                s["countdown"] = s["greens"][s["route"]]  # serve exactly the planned time
+                    s["route"] = nxt
+                    s["kind"] = "green"
+                    s["active"] = [nxt]
+                    s["countdown"] = s["greens"][nxt]  # serve exactly the planned time
 
-        phase = APPROACH_LABELS[s["route"]] if s["kind"] == "green" else s["kind"]
+        if s["kind"] in ("green", "surge"):
+            phase = "".join(APPROACH_LABELS[i] for i in s["active"])
+        else:
+            phase = s["kind"]
         self.store.update_signal(
             {
                 "id": sid,
-                "queues": {APPROACH_LABELS[i]: s["queues"][i] for i in range(4)},
+                "queues": {APPROACH_LABELS[i]: _total(s["queues"][i]) for i in range(4)},
+                "movements": {APPROACH_LABELS[i]: dict(s["queues"][i]) for i in range(4)},
                 "greens": {APPROACH_LABELS[i]: s["greens"][i] for i in range(4)},
                 "phase": phase,
-                "phase_index": s["route"],  # active/transitioning approach, always valid
+                "active": [APPROACH_LABELS[i] for i in s["active"]],
+                "phase_index": s["active"][0],  # legacy single-approach index, always valid
                 "countdown": max(0, s["countdown"]),
             }
         )
@@ -220,10 +319,12 @@ class DemoFeed:
                 if down_sid is None:
                     continue  # exits the grid at the fringe
                 idx = APPROACH_LABELS.index(approach)
-                down = self.sig[down_sid]
-                down["queues"][idx] = min(QUEUE_CAP, down["queues"][idx] + amount)
+                down_q = self.sig[down_sid]["queues"][idx]
+                room = QUEUE_CAP - _total(down_q)
+                if room > 0:
+                    down_q["S"] += min(amount, room)  # arrives continuing straight through
 
-        total_queue = sum(sum(s["queues"]) for s in self.sig.values())
+        total_queue = sum(_total(q) for s in self.sig.values() for q in s["queues"])
         # smooth synthetic network wait proxy tracking total congestion
         self._avg_wait = 0.85 * self._avg_wait + 0.15 * (total_queue * 2.5)
         self.store.record_metrics(avg_wait=self._avg_wait, total_queue=total_queue)
