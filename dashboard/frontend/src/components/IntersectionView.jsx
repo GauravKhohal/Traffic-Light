@@ -2,14 +2,14 @@ import { APPROACHES, activeApproaches, isGreenPhase } from '../constants'
 
 const YELLOW_S = 4
 const ALLRED_S = 2
-const MAX_SHOWN = 8 // cars drawn per approach even if the real queue is longer
+const MAX_SHOWN = 11 // cars drawn per approach even if the real queue is longer
 
 // Roughly-varied car body colours so the queue reads as real traffic, not a
 // single-colour block. Purely cosmetic, cycles by position in the queue.
 const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb923c']
 
 const LANE_OFFSET_PX = 9 // lateral gap between the left/straight/right sub-lanes
-const MAX_PER_TURN_LANE = 3 // left/right lanes shown at most this many, straight fills the rest
+const MAX_PER_TURN_LANE = 4 // left/right lanes shown at most this many, straight fills the rest
 
 function avg(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
@@ -90,7 +90,7 @@ export default function IntersectionView({ signal }) {
   const { id, queues = {}, movements = {}, greens = {}, phase, countdown } = signal
   const active = activeApproaches(signal)
   const isGreenNow = isGreenPhase(phase)
-  const size = 420
+  const size = 520
   const c = size / 2
   const roadHalf = 40 // half-width of each road surface
 
@@ -157,7 +157,7 @@ export default function IntersectionView({ signal }) {
             const lane = lanes[key]
             const shown = shownByLane[key]
             const group = Array.from({ length: shown }, (_, i) => {
-              const r = stopLineR + 14 + i * 22
+              const r = stopLineR + 12 + i * 18
               const vx = c + dx * r + lane.perp.x * LANE_OFFSET_PX
               const vy = c + dy * r + lane.perp.y * LANE_OFFSET_PX
               const flowing = lane.flowing

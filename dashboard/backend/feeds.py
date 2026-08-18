@@ -22,15 +22,29 @@ SIGNAL_IDS = [c + str(r) for c in "ABC" for r in range(3)]
 YELLOW_S = 4
 ALLRED_S = 2
 GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
-QUEUE_CAP = 22  # per-approach ceiling: keeps the demo bounded no matter how long it runs
+QUEUE_CAP = 40  # per-approach ceiling: keeps the demo bounded no matter how long it runs
 
 # Per-approach traffic is split into three movements. Left never needs the
 # signal at all - it is free-flowing on every approach, every phase (the
 # "all left had to be green" rule). Right conflicts with the opposing
 # approach's through movement, so it is only released during that approach's
 # own solo green, never during a paired straight-only surge (below).
+#
+# Right also shares a corner with the free-flowing left of the approach one
+# step counter-clockwise: e.g. a car turning right off W (W -> S) sweeps
+# through the same south-west corner as a car turning left off S (S -> W),
+# on a crossing path - the two are headed for each other's arm. Since that
+# left is never held, a right turn has to yield to it instead, exactly like
+# a real right-turn-on-green giving way to a permitted opposing movement
+# through the same corner. See CONFLICTING_LEFT below.
 LEFT_SHARE = 0.15
 RIGHT_SHARE = 0.20
+
+# Right turn off approach i shares its corner with the left turn off
+# approach CONFLICTING_LEFT[i] (N<->W, E<->N, S<->E, W<->S - each pair
+# swaps the same two arms in opposite directions). Index matches
+# APPROACH_LABELS = ["N", "E", "S", "W"].
+CONFLICTING_LEFT = {0: 3, 1: 0, 2: 1, 3: 2}
 
 # N->E->S->W rotation order: N=0, E=1, S=2, W=3. When both members of an
 # opposing pair (N+S or E+W) are individually congested, a "surge" phase runs
@@ -122,7 +136,7 @@ class DemoFeed:
                 "active": [0],  # approach indices in the current spotlight (2 during a surge)
                 "countdown": GREEN_BASE,
                 "queues": [
-                    {"L": 0, "S": self.rng.randint(0, 6), "R": 0} for _ in range(4)
+                    {"L": 0, "S": self.rng.randint(0, 10), "R": 0} for _ in range(4)
                 ],
                 "greens": [GREEN_BASE] * 4,
                 "rates": self._new_rates(sid),
@@ -138,11 +152,11 @@ class DemoFeed:
         real demand comes from actual upstream traffic, not randomness,
         which is the whole point of connecting the signals together."""
         fringe = [i for i, a in enumerate(APPROACH_LABELS) if self.upstream[sid][a] is None]
-        rates = [self.rng.uniform(0.01, 0.03) for _ in range(4)]
+        rates = [self.rng.uniform(0.02, 0.05) for _ in range(4)]
         for i in fringe:
-            rates[i] = self.rng.uniform(0.03, 0.10)
+            rates[i] = self.rng.uniform(0.06, 0.18)
         if fringe:
-            rates[self.rng.choice(fringe)] = self.rng.uniform(0.25, 0.42)
+            rates[self.rng.choice(fringe)] = self.rng.uniform(0.40, 0.60)
         return rates
 
     def _tick_signal(self, sid):
@@ -174,10 +188,13 @@ class DemoFeed:
 
         # free left: every approach's left queue discharges every tick,
         # independent of phase and of fixed/AI mode - a left turn is never
-        # held at this intersection.
+        # held at this intersection. Recorded per-approach so the right-turn
+        # discharge below can yield to whichever left just used its corner.
+        left_flowing = {}
         for i in range(4):
             q = s["queues"][i]
             d = min(q["L"], 1)
+            left_flowing[i] = d > 0
             if d:
                 q["L"] -= d
                 self.store.record_served(d)
@@ -195,9 +212,12 @@ class DemoFeed:
                 if s_amt:
                     self.store.record_served(s_amt)
                     discharged[APPROACH_LABELS[idx]] = s_amt
-                if s["kind"] == "green":
+                if s["kind"] == "green" and not left_flowing[CONFLICTING_LEFT[idx]]:
                     # solo green also clears this approach's right-turn queue;
-                    # a surge never does - right holds until its own solo turn
+                    # a surge never does - right holds until its own solo turn.
+                    # Also holds on any tick where the corner-sharing approach
+                    # has a free left crossing right now (see CONFLICTING_LEFT)
+                    # - the right turn yields instead of cutting across it.
                     r_amt = min(q["R"], self.rng.choice([1, 1, 2, 2]))
                     q["R"] -= r_amt
                     if r_amt:
