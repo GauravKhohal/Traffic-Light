@@ -55,6 +55,13 @@ const DIR = {
   W: { dx: -1, dy: 0 },
 }
 
+// A right turn off an approach shares its corner with the free-flowing left
+// turn one step counter-clockwise: W's right (W -> S) crosses S's left
+// (S -> W) at the south-west corner, and so on around the intersection
+// (N<-W, E<-N, S<-E, W<-S). Since that left is never held, the right turn
+// has to yield to it instead - mirrors feeds.py's CONFLICTING_LEFT.
+const CONFLICTING_LEFT_APPROACH = { N: 'W', E: 'N', S: 'E', W: 'S' }
+
 // A real signal head shows one lit arrow per movement currently allowed, not
 // a plain ball - a driver sees exactly which ways they may go. `ux,uy` is the
 // direction the arrow points; each movement's arrow is coloured independently
@@ -121,7 +128,8 @@ export default function IntersectionView({ signal }) {
           // a surge (2-letter phase code) opens straight for both paired
           // approaches but holds right; a solo green (1-letter code) opens both
           const isSurge = isGreen && phase.length === 2
-          const rightGreen = isGreen && phase.length === 1
+          const conflictLeftActive = (movements[CONFLICTING_LEFT_APPROACH[approach]]?.L || 0) > 0
+          const rightGreen = isGreen && phase.length === 1 && !conflictLeftActive
           const mv = movements[approach] || { L: 0, S: 0, R: 0 }
           const q = queues[approach] || 0
           const stopLineR = roadHalf + 4
@@ -205,8 +213,10 @@ export default function IntersectionView({ signal }) {
           // Left is always green (free-flowing, every phase). Straight is
           // green on a solo green or a paired surge, amber while its own
           // green is ending. Right is only ever green on a solo green (never
-          // during a surge, where it's held) and only ambers if it was
-          // actually running before this yellow, not if it was already held.
+          // during a surge, where it's held), and only ambers if it was
+          // actually running before this yellow, not if it was already held
+          // - which now includes being held by a crossing left (rightGreen
+          // above already folds conflictLeftActive in, so this stays red).
           const soloActive = isActive && active.length === 1
           const straightColor = isGreen ? '#22c55e' : isYellow ? '#f59e0b' : '#ef4444'
           const rightColor = rightGreen ? '#22c55e' : isYellow && soloActive ? '#f59e0b' : '#ef4444'
@@ -292,6 +302,7 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
   const rows = APPROACHES.map((a, i) => {
     const q = queues[a] || 0
     const isActive = active.includes(a)
+    const conflictLeftActive = (movements[CONFLICTING_LEFT_APPROACH[a]]?.L || 0) > 0
     return {
       approach: a,
       queue: q,
@@ -299,7 +310,9 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
       isActive,
       isGreen: isActive && isGreenNow,
       isYellow: isActive && phase === 'yellow',
-      rightHeld: isActive && isGreenNow && isSurge,
+      rightHeldSurge: isActive && isGreenNow && isSurge,
+      rightHeldConflict: isActive && isGreenNow && !isSurge && conflictLeftActive,
+      conflictApproach: CONFLICTING_LEFT_APPROACH[a],
       eta: isActive ? 0 : etaSeconds(signal, i),
     }
   })
@@ -328,9 +341,11 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
           </span>
           <span className={r.isGreen ? 'font-semibold text-emerald-400' : r.isYellow ? 'text-amber-400' : 'text-slate-400'}>
             {r.isGreen
-              ? r.rightHeld
+              ? r.rightHeldSurge
                 ? `STRAIGHT, ${countdown}s left (right held)`
-                : `GREEN, ${countdown}s left`
+                : r.rightHeldConflict
+                  ? `GREEN, ${countdown}s left (right holds — crossing ${r.conflictApproach} left)`
+                  : `GREEN, ${countdown}s left`
               : r.isYellow
                 ? `yellow, ${countdown}s`
                 : r.queue === 0
@@ -340,7 +355,9 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
         </div>
       ))}
       <div className="px-3 py-1.5 text-xs text-slate-500">
-        Left turns flow continuously on every approach — never held by the signal.
+        Left turns flow continuously on every approach — never held by the signal. A
+        right turn holds whenever the crossing approach's left is active, since both
+        cross the same corner.
       </div>
     </div>
   )
