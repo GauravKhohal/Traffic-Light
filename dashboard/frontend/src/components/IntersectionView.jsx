@@ -62,6 +62,26 @@ const DIR = {
 // has to yield to it instead - mirrors feeds.py's CONFLICTING_LEFT.
 const CONFLICTING_LEFT_APPROACH = { N: 'W', E: 'N', S: 'E', W: 'S' }
 
+// Only two of the four lefts are actually clear of an active approach A's
+// own path: A's own left, and PREV(A)'s (handled above - A's right yields to
+// it instead of holding it). The other two merge nose-to-nose with A's own
+// straight/right and have to hold for as long as A is active - mirrors
+// feeds.py's _held_lefts:
+//  - NEXT(A)'s left merges into the same exit lane as A's straight.
+//  - OPP(A)'s left merges into the same exit lane as A's right.
+// During a straight-only surge (two approaches active) each one's own left
+// stays free, and this naturally holds both remaining approaches' lefts.
+function heldLeftApproaches(active) {
+  const idxs = active.map((a) => APPROACHES.indexOf(a))
+  const held = new Set()
+  for (const i of idxs) {
+    held.add((i + 1) % 4)
+    held.add((i + 2) % 4)
+  }
+  for (const i of idxs) held.delete(i)
+  return new Set([...held].map((i) => APPROACHES[i]))
+}
+
 // A real signal head shows one lit arrow per movement currently allowed, not
 // a plain ball - a driver sees exactly which ways they may go. `ux,uy` is the
 // direction the arrow points; each movement's arrow is coloured independently
@@ -97,6 +117,9 @@ export default function IntersectionView({ signal }) {
   const { id, queues = {}, movements = {}, greens = {}, phase, countdown } = signal
   const active = activeApproaches(signal)
   const isGreenNow = isGreenPhase(phase)
+  // held only while something is actually active (green/surge); clear during
+  // yellow/all-red, when nothing has protected right-of-way - matches feeds.py
+  const heldLefts = isGreenNow ? heldLeftApproaches(active) : new Set()
   const size = 520
   const c = size / 2
   const roadHalf = 40 // half-width of each road surface
@@ -130,22 +153,25 @@ export default function IntersectionView({ signal }) {
           const isSurge = isGreen && phase.length === 2
           const conflictLeftActive = (movements[CONFLICTING_LEFT_APPROACH[approach]]?.L || 0) > 0
           const rightGreen = isGreen && phase.length === 1 && !conflictLeftActive
+          const leftHeld = heldLefts.has(approach)
           const mv = movements[approach] || { L: 0, S: 0, R: 0 }
           const q = queues[approach] || 0
           const stopLineR = roadHalf + 4
 
-          // Left is always free-flowing; straight flows on a solo green or a
-          // paired surge; right only flows on this approach's own solo green
-          // (never during a surge) - see feeds.py. Each movement gets its own
-          // sub-lane (a lateral offset) and its own flow direction: straight
-          // continues through the intersection, left/right blend the through
-          // direction with a sideways component so a turning car visibly
-          // peels off instead of driving straight through.
+          // Left flows unless it's held by a conflict with the currently
+          // active approach(es) (see heldLeftApproaches above); straight
+          // flows on a solo green or a paired surge; right only flows on
+          // this approach's own solo green (never during a surge) - see
+          // feeds.py. Each movement gets its own sub-lane (a lateral offset)
+          // and its own flow direction: straight continues through the
+          // intersection, left/right blend the through direction with a
+          // sideways component so a turning car visibly peels off instead of
+          // driving straight through.
           const travel = { x: -dx, y: -dy }
           const leftPerp = { x: travel.y, y: -travel.x }
           const rightPerp = { x: -travel.y, y: travel.x }
           const lanes = {
-            L: { count: mv.L, flowing: true, perp: leftPerp, flow: avg(travel, leftPerp), ring: '#22c55e' },
+            L: { count: mv.L, flowing: !leftHeld, perp: leftPerp, flow: avg(travel, leftPerp), ring: leftHeld ? '#ef4444' : '#22c55e' },
             S: { count: mv.S, flowing: isGreen, perp: { x: 0, y: 0 }, flow: travel, ring: null },
             R: { count: mv.R, flowing: rightGreen, perp: rightPerp, flow: avg(travel, rightPerp), ring: '#ef4444' },
           }
@@ -210,14 +236,16 @@ export default function IntersectionView({ signal }) {
 
           // One arrow per movement, each independently coloured red/amber/
           // green for what it's actually doing right now - not a plain ball.
-          // Left is always green (free-flowing, every phase). Straight is
-          // green on a solo green or a paired surge, amber while its own
-          // green is ending. Right is only ever green on a solo green (never
-          // during a surge, where it's held), and only ambers if it was
-          // actually running before this yellow, not if it was already held
-          // - which now includes being held by a crossing left (rightGreen
-          // above already folds conflictLeftActive in, so this stays red).
+          // Left is green unless heldLeftApproaches holds it for this active
+          // approach (leftHeld above). Straight is green on a solo green or
+          // a paired surge, amber while its own green is ending. Right is
+          // only ever green on a solo green (never during a surge, where
+          // it's held), and only ambers if it was actually running before
+          // this yellow, not if it was already held - which now includes
+          // being held by a crossing left (rightGreen above already folds
+          // conflictLeftActive in, so this stays red).
           const soloActive = isActive && active.length === 1
+          const leftColor = leftHeld ? '#ef4444' : '#22c55e'
           const straightColor = isGreen ? '#22c55e' : isYellow ? '#f59e0b' : '#ef4444'
           const rightColor = rightGreen ? '#22c55e' : isYellow && soloActive ? '#f59e0b' : '#ef4444'
           const CLUSTER_GAP = 6
@@ -241,7 +269,7 @@ export default function IntersectionView({ signal }) {
               {cars}
               {/* signal head housing */}
               <rect x={sx - 15} y={sy - 15} width="30" height="30" rx="6" fill="#0b1220" stroke="#334155" />
-              <Arrow cx={leftAnchor.x} cy={leftAnchor.y} ux={leftPerp.x} uy={leftPerp.y} color="#22c55e" />
+              <Arrow cx={leftAnchor.x} cy={leftAnchor.y} ux={leftPerp.x} uy={leftPerp.y} color={leftColor} />
               <Arrow cx={straightAnchor.x} cy={straightAnchor.y} ux={travel.x} uy={travel.y} color={straightColor} />
               <Arrow cx={rightAnchor.x} cy={rightAnchor.y} ux={rightPerp.x} uy={rightPerp.y} color={rightColor} />
 
@@ -288,7 +316,7 @@ export default function IntersectionView({ signal }) {
         ))}
       </div>
 
-      <StatusList signal={signal} active={active} isGreenNow={isGreenNow} phase={phase} countdown={countdown} />
+      <StatusList signal={signal} active={active} isGreenNow={isGreenNow} phase={phase} countdown={countdown} heldLefts={heldLefts} />
     </div>
   )
 }
@@ -296,7 +324,7 @@ export default function IntersectionView({ signal }) {
 // Unambiguous, plain-text readout — one row per approach, in the order it
 // will actually be served, so there's no small overlapping SVG text to
 // misread. This is the same eta/skip logic as the diagram, just spelled out.
-function StatusList({ signal, active, isGreenNow, phase, countdown }) {
+function StatusList({ signal, active, isGreenNow, phase, countdown, heldLefts }) {
   const { queues = {}, movements = {} } = signal
   const isSurge = isGreenNow && phase.length === 2
   const rows = APPROACHES.map((a, i) => {
@@ -310,6 +338,7 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
       isActive,
       isGreen: isActive && isGreenNow,
       isYellow: isActive && phase === 'yellow',
+      leftHeld: heldLefts.has(a),
       rightHeldSurge: isActive && isGreenNow && isSurge,
       rightHeldConflict: isActive && isGreenNow && !isSurge && conflictLeftActive,
       conflictApproach: CONFLICTING_LEFT_APPROACH[a],
@@ -338,6 +367,9 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
               · {r.queue} car{r.queue === 1 ? '' : 's'}
               {r.mv ? ` (L${r.mv.L} · S${r.mv.S} · R${r.mv.R})` : ''}
             </span>
+            {r.leftHeld && (
+              <span className="text-[10px] font-semibold text-red-400">left held</span>
+            )}
           </span>
           <span className={r.isGreen ? 'font-semibold text-emerald-400' : r.isYellow ? 'text-amber-400' : 'text-slate-400'}>
             {r.isGreen
@@ -355,9 +387,9 @@ function StatusList({ signal, active, isGreenNow, phase, countdown }) {
         </div>
       ))}
       <div className="px-3 py-1.5 text-xs text-slate-500">
-        Left turns flow continuously on every approach — never held by the signal. A
-        right turn holds whenever the crossing approach's left is active, since both
-        cross the same corner.
+        Only two lefts run free at a time — the active approach's own, and the one
+        whose crossing corner it yields its right into. The other two would merge
+        straight into the active approach's own path, so they hold until it stops.
       </div>
     </div>
   )

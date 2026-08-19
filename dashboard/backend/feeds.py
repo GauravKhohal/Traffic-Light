@@ -24,21 +24,54 @@ ALLRED_S = 2
 GREEN_BASE, GREEN_MIN, GREEN_MAX = 30, 15, 60
 QUEUE_CAP = 40  # per-approach ceiling: keeps the demo bounded no matter how long it runs
 
-# Per-approach traffic is split into three movements. Left never needs the
-# signal at all - it is free-flowing on every approach, every phase (the
-# "all left had to be green" rule). Right conflicts with the opposing
+# Per-approach traffic is split into three movements. Left is normally
+# free-flowing - a left turn never needs the signal - but only two of the
+# four approaches' lefts are actually clear of the currently active
+# approach's own path; the other two would merge nose-to-nose with it, so
+# those hold for as long as it's running. Right conflicts with the opposing
 # approach's through movement, so it is only released during that approach's
 # own solo green, never during a paired straight-only surge (below).
 #
-# Right also shares a corner with the free-flowing left of the approach one
-# step counter-clockwise: e.g. a car turning right off W (W -> S) sweeps
-# through the same south-west corner as a car turning left off S (S -> W),
-# on a crossing path - the two are headed for each other's arm. Since that
-# left is never held, a right turn has to yield to it instead, exactly like
-# a real right-turn-on-green giving way to a permitted opposing movement
-# through the same corner. See CONFLICTING_LEFT below.
+# Concretely, for active approach A (A = W, say):
+#  - A's own left (W -> N) is free, obviously.
+#  - The left of the approach one step counter-clockwise, PREV(A) (S's left,
+#    S -> W) crosses A's right (W -> S) at their shared corner - a genuine
+#    crossing, not a merge, and since left is never held, A's right yields to
+#    it instead (CONFLICTING_LEFT below), so this left also stays free.
+#  - The left of the approach one step CLOCKWISE, NEXT(A) (N's left, N -> E)
+#    merges into the same exit lane as A's own straight (W -> E) - both end
+#    up eastbound on the E arm at once. This left holds.
+#  - The left of the OPPOSITE approach, OPP(A) (E's left, E -> S) merges into
+#    the same exit lane as A's right (W -> S) - both end up southbound on the
+#    S arm. This left also holds.
+# So only PREV(A)'s and A's own left run free; NEXT(A)'s and OPP(A)'s hold
+# until A stops being active. During a straight-only surge two approaches are
+# active at once (e.g. N+S): each one's own left stays free (it's excluded
+# from the other's held set below), while E and W's lefts end up held by
+# both - unsurprising, since a surge floods the intersection with N/S through
+# traffic that neither E nor W can safely cross or merge into.
 LEFT_SHARE = 0.15
 RIGHT_SHARE = 0.20
+
+
+def _next_idx(i):
+    return (i + 1) % 4
+
+
+def _opposite_idx(i):
+    return (i + 2) % 4
+
+
+def _held_lefts(active):
+    """Approach indices whose left must hold while `active` (1 or 2 approach
+    indices) is running - see the movement-conflict comment above."""
+    held = set()
+    for a in active:
+        held.add(_next_idx(a))
+        held.add(_opposite_idx(a))
+    held.difference_update(active)  # an active approach's own left is never held
+    return held
+
 
 # Right turn off approach i shares its corner with the left turn off
 # approach CONFLICTING_LEFT[i] (N<->W, E<->N, S<->E, W<->S - each pair
@@ -186,12 +219,25 @@ class DemoFeed:
                     else:
                         q["S"] += 1
 
-        # free left: every approach's left queue discharges every tick,
-        # independent of phase and of fixed/AI mode - a left turn is never
-        # held at this intersection. Recorded per-approach so the right-turn
-        # discharge below can yield to whichever left just used its corner.
+        # straight-through discharge only (what continues into a downstream
+        # neighbour's matching approach); left/right exit to a perpendicular
+        # street not modelled by this simplified grid.
+        discharged = {a: 0 for a in APPROACH_LABELS}
+        active = s["active"]
+        # held only while something is actually active (green/surge); clear
+        # during yellow/all-red, when nothing has protected right-of-way
+        held_lefts = _held_lefts(active) if s["kind"] in ("green", "surge") else set()
+
+        # free left: every approach's left queue discharges every tick unless
+        # it's currently held by a movement conflict with the active
+        # approach(es) (see _held_lefts above) - otherwise independent of
+        # fixed/AI mode. Recorded per-approach so the right-turn discharge
+        # below can yield to whichever left just used its corner.
         left_flowing = {}
         for i in range(4):
+            if i in held_lefts:
+                left_flowing[i] = False
+                continue
             q = s["queues"][i]
             d = min(q["L"], 1)
             left_flowing[i] = d > 0
@@ -199,11 +245,6 @@ class DemoFeed:
                 q["L"] -= d
                 self.store.record_served(d)
 
-        # straight-through discharge only (what continues into a downstream
-        # neighbour's matching approach); left/right exit to a perpendicular
-        # street not modelled by this simplified grid.
-        discharged = {a: 0 for a in APPROACH_LABELS}
-        active = s["active"]
         if s["kind"] in ("green", "surge"):
             for idx in active:
                 q = s["queues"][idx]
