@@ -122,7 +122,9 @@ export default function IntersectionView({ signal }) {
   const heldLefts = isGreenNow ? heldLeftApproaches(active) : new Set()
   const size = 520
   const c = size / 2
-  const roadHalf = 40 // half-width of each road surface
+  const roadHalf = 40 // half-width of each road surface (both directions)
+  const sidewalkW = 9 // width of the curb/sidewalk strip along each road edge
+  const outerHalf = roadHalf + sidewalkW // half-width including sidewalks - marks where the city blocks start
 
   return (
     <div className="rounded-xl bg-slate-900 p-4 ring-1 ring-slate-800">
@@ -131,16 +133,55 @@ export default function IntersectionView({ signal }) {
         <span className="text-xs text-slate-500">road · signal · queue · AI green plan</span>
       </div>
       <svg viewBox={`0 0 ${size} ${size}`} className="w-full">
-        {/* road surfaces */}
-        <rect x={c - roadHalf} y="0" width={roadHalf * 2} height={size} fill="#111827" />
-        <rect x="0" y={c - roadHalf} width={size} height={roadHalf * 2} fill="#111827" />
-        {/* lane dividers (dashed centre lines) */}
-        <line x1={c} y1="0" x2={c} y2={c - roadHalf} stroke="#facc15" strokeWidth="1.5" strokeDasharray="8 8" opacity="0.5" />
-        <line x1={c} y1={c + roadHalf} x2={c} y2={size} stroke="#facc15" strokeWidth="1.5" strokeDasharray="8 8" opacity="0.5" />
-        <line x1="0" y1={c} x2={c - roadHalf} y2={c} stroke="#facc15" strokeWidth="1.5" strokeDasharray="8 8" opacity="0.5" />
-        <line x1={c + roadHalf} y1={c} x2={size} y2={c} stroke="#facc15" strokeWidth="1.5" strokeDasharray="8 8" opacity="0.5" />
-        {/* intersection surface */}
-        <rect x={c - roadHalf} y={c - roadHalf} width={roadHalf * 2} height={roadHalf * 2} fill="#1e293b" />
+        <defs>
+          <pattern id={`hatch-${id}`} width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+            <line x1="0" y1="0" x2="0" y2="6" stroke="#94a3b8" strokeWidth="1" opacity="0.15" />
+          </pattern>
+        </defs>
+
+        {/* city blocks: the four corners outside the road+sidewalk, lightly
+            textured so the road reads against a real backdrop, not empty space */}
+        {[
+          [0, 0],
+          [c + outerHalf, 0],
+          [0, c + outerHalf],
+          [c + outerHalf, c + outerHalf],
+        ].map(([bx, by], i) => (
+          <g key={i}>
+            <rect x={bx} y={by} width={c - outerHalf} height={c - outerHalf} fill="#1e293b" />
+            <rect x={bx} y={by} width={c - outerHalf} height={c - outerHalf} fill={`url(#hatch-${id})`} />
+          </g>
+        ))}
+
+        {/* sidewalks (curb strips flanking each road) */}
+        <rect x={c - outerHalf} y="0" width={sidewalkW} height={size} fill="#475569" />
+        <rect x={c + roadHalf} y="0" width={sidewalkW} height={size} fill="#475569" />
+        <rect x="0" y={c - outerHalf} width={size} height={sidewalkW} fill="#475569" />
+        <rect x="0" y={c + roadHalf} width={size} height={sidewalkW} fill="#475569" />
+
+        {/* asphalt road surfaces */}
+        <rect x={c - roadHalf} y="0" width={roadHalf * 2} height={size} fill="#334155" />
+        <rect x="0" y={c - roadHalf} width={size} height={roadHalf * 2} fill="#334155" />
+        {/* intersection surface, a touch lighter so its boundary reads clearly */}
+        <rect x={c - roadHalf} y={c - roadHalf} width={roadHalf * 2} height={roadHalf * 2} fill="#3f4a5e" />
+
+        {/* double-yellow centre line, each arm - real no-passing road marking,
+            stops short of the intersection surface on both ends */}
+        {[
+          [c, 0, c, c - roadHalf],
+          [c, c + roadHalf, c, size],
+          [0, c, c - roadHalf, c],
+          [c + roadHalf, c, size, c],
+        ].map(([x1, y1, x2, y2], i) => {
+          const vert = x1 === x2
+          const off = vert ? { x: 1.6, y: 0 } : { x: 0, y: 1.6 }
+          return (
+            <g key={i}>
+              <line x1={x1 - off.x} y1={y1 - off.y} x2={x2 - off.x} y2={y2 - off.y} stroke="#facc15" strokeWidth="1.6" />
+              <line x1={x1 + off.x} y1={y1 + off.y} x2={x2 + off.x} y2={y2 + off.y} stroke="#facc15" strokeWidth="1.6" />
+            </g>
+          )
+        })}
 
         {Object.entries(DIR).map(([approach, { dx, dy }]) => {
           const vertical = dx === 0
@@ -198,6 +239,13 @@ export default function IntersectionView({ signal }) {
           // queued / flowing cars, nose pointed at the stop line, one group
           // per lane so a viewer can see left cars peel off in their own
           // lane while the through+right lane sits still (held) or flows
+          // wheel nubs: two pairs (front/rear) poking slightly past the
+          // body's long edges, like a simple top-down car icon - along-axis
+          // offset toward front/rear, cross-axis offset just past the body
+          const crossHalf = vertical ? w / 2 : h / 2
+          const alongOffset = (vertical ? h : w) * 0.3
+          const wheelLong = 6
+          const wheelThick = 2
           let colorCursor = 0
           const renderLane = (specs, keyPrefix) =>
             specs.map((spec, i) => {
@@ -207,12 +255,29 @@ export default function IntersectionView({ signal }) {
               const flowing = spec.flowing
               const color = CAR_COLORS[colorCursor % CAR_COLORS.length]
               colorCursor += 1
+              const wheels = [-1, 1].flatMap((side) =>
+                [-1, 1].map((end) => {
+                  const cross = side * (crossHalf + 0.5)
+                  const along = end * alongOffset
+                  const rw = vertical ? wheelThick : wheelLong
+                  const rh = vertical ? wheelLong : wheelThick
+                  return {
+                    x: (vertical ? vx + cross : vx + along) - rw / 2,
+                    y: (vertical ? vy + along : vy + cross) - rh / 2,
+                    rw,
+                    rh,
+                  }
+                })
+              )
               return (
                 <g
                   key={`${keyPrefix}-${i}`}
                   className={flowing ? 'vehicle-flowing' : ''}
                   style={flowing ? { '--fx': spec.flow.x, '--fy': spec.flow.y, animationDelay: `${i * 160}ms` } : undefined}
                 >
+                  {wheels.map((wl, wi) => (
+                    <rect key={wi} x={wl.x} y={wl.y} width={wl.rw} height={wl.rh} rx="1" fill="#0b1220" opacity="0.85" />
+                  ))}
                   <rect
                     x={vx - w / 2}
                     y={vy - h / 2}
@@ -237,6 +302,30 @@ export default function IntersectionView({ signal }) {
               )
             })
           const cars = [...renderLane(leftSpecs, 'L'), ...renderLane(throughSpecs, 'T')]
+
+          // white dashed lane-boundary between the left lane and the
+          // through+right lane, running the length of this arm
+          const boundaryOff = LANE_OFFSET_PX / 2
+          const laneBoundary = {
+            x1: c + dx * stopLineR + leftPerp.x * boundaryOff,
+            y1: c + dy * stopLineR + leftPerp.y * boundaryOff,
+            x2: c + dx * c + leftPerp.x * boundaryOff,
+            y2: c + dy * c + leftPerp.y * boundaryOff,
+          }
+
+          // zebra crosswalk right at the stop line, spanning the full road
+          // width (both directions, even though only this side has cars)
+          const stripeCount = 7
+          const stripeGap = (roadHalf * 2 - 8) / (stripeCount - 1)
+          const crosswalk = Array.from({ length: stripeCount }, (_, i) => {
+            const t = -roadHalf + 4 + i * stripeGap
+            return {
+              x: c + dx * stopLineR + leftPerp.x * t,
+              y: c + dy * stopLineR + leftPerp.y * t,
+            }
+          })
+          const stripeW = vertical ? 4 : 10
+          const stripeH = vertical ? 10 : 4
 
           // signal head just outside the stop line
           const sx = c + dx * (stopLineR - 2) + (vertical ? 18 : 0)
@@ -275,6 +364,27 @@ export default function IntersectionView({ signal }) {
 
           return (
             <g key={approach}>
+              <line
+                x1={laneBoundary.x1}
+                y1={laneBoundary.y1}
+                x2={laneBoundary.x2}
+                y2={laneBoundary.y2}
+                stroke="#e2e8f0"
+                strokeWidth="1.2"
+                strokeDasharray="6 6"
+                opacity="0.4"
+              />
+              {crosswalk.map((s, i) => (
+                <rect
+                  key={i}
+                  x={s.x - stripeW / 2}
+                  y={s.y - stripeH / 2}
+                  width={stripeW}
+                  height={stripeH}
+                  fill="#e2e8f0"
+                  opacity="0.7"
+                />
+              ))}
               {cars}
               {/* signal head housing */}
               <rect x={sx - 15} y={sy - 15} width="30" height="30" rx="6" fill="#0b1220" stroke="#334155" />
