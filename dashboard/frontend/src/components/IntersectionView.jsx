@@ -8,8 +8,8 @@ const MAX_SHOWN = 11 // cars drawn per approach even if the real queue is longer
 // single-colour block. Purely cosmetic, cycles by position in the queue.
 const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb923c']
 
-const LANE_OFFSET_PX = 9 // lateral gap between the left/straight/right sub-lanes
-const MAX_PER_TURN_LANE = 4 // left/right lanes shown at most this many, straight fills the rest
+const LANE_OFFSET_PX = 19 // lateral gap between the dedicated left lane and the through+right lane
+const MAX_PER_TURN_LANE = 4 // left lane shown at most this many, through+right lane fills the rest
 
 function avg(a, b) {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
@@ -158,50 +158,60 @@ export default function IntersectionView({ signal }) {
           const q = queues[approach] || 0
           const stopLineR = roadHalf + 4
 
-          // Left flows unless it's held by a conflict with the currently
-          // active approach(es) (see heldLeftApproaches above); straight
-          // flows on a solo green or a paired surge; right only flows on
-          // this approach's own solo green (never during a surge) - see
-          // feeds.py. Each movement gets its own sub-lane (a lateral offset)
-          // and its own flow direction: straight continues through the
+          // Two physical lanes, like a real approach road: a dedicated left
+          // lane (left is its own free-flowing movement, a slip lane in
+          // effect - held or not per heldLeftApproaches above) and a shared
+          // through+right lane, since straight and right traffic wait at the
+          // same stop line and only diverge once they actually move. Right
+          // only flows on this approach's own solo green (never during a
+          // surge) - see feeds.py. Each car keeps its own flow direction for
+          // when it's actually moving: straight continues through the
           // intersection, left/right blend the through direction with a
           // sideways component so a turning car visibly peels off instead of
           // driving straight through.
           const travel = { x: -dx, y: -dy }
           const leftPerp = { x: travel.y, y: -travel.x }
           const rightPerp = { x: -travel.y, y: travel.x }
+          const noPerp = { x: 0, y: 0 }
           const lanes = {
-            L: { count: mv.L, flowing: !leftHeld, perp: leftPerp, flow: avg(travel, leftPerp), ring: leftHeld ? '#ef4444' : '#22c55e' },
-            S: { count: mv.S, flowing: isGreen, perp: { x: 0, y: 0 }, flow: travel, ring: null },
-            R: { count: mv.R, flowing: rightGreen, perp: rightPerp, flow: avg(travel, rightPerp), ring: '#ef4444' },
+            L: { count: mv.L, flowing: !leftHeld, flow: avg(travel, leftPerp), ring: leftHeld ? '#ef4444' : '#22c55e' },
+            S: { count: mv.S, flowing: isGreen, flow: travel, ring: null },
+            R: { count: mv.R, flowing: rightGreen, flow: avg(travel, rightPerp), ring: '#ef4444' },
           }
           const shownL = Math.min(MAX_PER_TURN_LANE, lanes.L.count)
-          const shownR = Math.min(MAX_PER_TURN_LANE, lanes.R.count)
-          const shownS = Math.min(Math.max(0, MAX_SHOWN - shownL - shownR), lanes.S.count)
-          const shownByLane = { L: shownL, S: shownS, R: shownR }
+          const throughBudget = Math.max(0, MAX_SHOWN - shownL)
+          const shownS = Math.min(lanes.S.count, throughBudget)
+          const shownR = Math.min(lanes.R.count, Math.max(0, throughBudget - shownS))
 
           const w = vertical ? 20 : 30
           const h = vertical ? 30 : 20
 
-          // queued / flowing cars, nose pointed at the stop line, one small
-          // group per movement so a viewer can see left cars peeling off
-          // while right cars sit still (held) and straight cars come through
+          // left lane cars get the lateral offset that puts them in their own
+          // lane; through+right cars share one file directly ahead of the
+          // stop line (perp 0,0), one behind another in arrival order
+          const leftSpecs = Array.from({ length: shownL }, () => ({ ...lanes.L, perp: leftPerp }))
+          const throughSpecs = [
+            ...Array.from({ length: shownS }, () => ({ ...lanes.S, perp: noPerp })),
+            ...Array.from({ length: shownR }, () => ({ ...lanes.R, perp: noPerp })),
+          ]
+
+          // queued / flowing cars, nose pointed at the stop line, one group
+          // per lane so a viewer can see left cars peel off in their own
+          // lane while the through+right lane sits still (held) or flows
           let colorCursor = 0
-          const cars = ['L', 'S', 'R'].flatMap((key) => {
-            const lane = lanes[key]
-            const shown = shownByLane[key]
-            const group = Array.from({ length: shown }, (_, i) => {
+          const renderLane = (specs, keyPrefix) =>
+            specs.map((spec, i) => {
               const r = stopLineR + 12 + i * 18
-              const vx = c + dx * r + lane.perp.x * LANE_OFFSET_PX
-              const vy = c + dy * r + lane.perp.y * LANE_OFFSET_PX
-              const flowing = lane.flowing
+              const vx = c + dx * r + spec.perp.x * LANE_OFFSET_PX
+              const vy = c + dy * r + spec.perp.y * LANE_OFFSET_PX
+              const flowing = spec.flowing
               const color = CAR_COLORS[colorCursor % CAR_COLORS.length]
               colorCursor += 1
               return (
                 <g
-                  key={`${key}-${i}`}
+                  key={`${keyPrefix}-${i}`}
                   className={flowing ? 'vehicle-flowing' : ''}
-                  style={flowing ? { '--fx': lane.flow.x, '--fy': lane.flow.y, animationDelay: `${i * 160}ms` } : undefined}
+                  style={flowing ? { '--fx': spec.flow.x, '--fy': spec.flow.y, animationDelay: `${i * 160}ms` } : undefined}
                 >
                   <rect
                     x={vx - w / 2}
@@ -210,8 +220,8 @@ export default function IntersectionView({ signal }) {
                     height={h}
                     rx="5"
                     fill={color}
-                    stroke={lane.ring ?? '#0f172a'}
-                    strokeWidth={lane.ring ? 2 : 1}
+                    stroke={spec.ring ?? '#0f172a'}
+                    strokeWidth={spec.ring ? 2 : 1}
                   />
                   {/* windshield, offset toward the direction of travel (nose) */}
                   <rect
@@ -226,8 +236,7 @@ export default function IntersectionView({ signal }) {
                 </g>
               )
             })
-            return group
-          })
+          const cars = [...renderLane(leftSpecs, 'L'), ...renderLane(throughSpecs, 'T')]
 
           // signal head just outside the stop line
           const sx = c + dx * (stopLineR - 2) + (vertical ? 18 : 0)
