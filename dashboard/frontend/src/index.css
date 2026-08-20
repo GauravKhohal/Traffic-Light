@@ -11,23 +11,26 @@ body {
   @apply bg-slate-950 text-slate-100;
 }
 
-/* Vehicle markers on the grid map: queued and static while red; this
-   animates them drifting toward and through the intersection on a loop
-   while their approach has green, using per-marker --fx/--fy direction
-   variables and a staggered animation-delay for a flowing-platoon look. */
+/* Vehicle markers: queued and static while red; this animates them driving
+   through the intersection and on out the far side on a loop while their
+   approach has green, using per-marker --fx/--fy direction and --fdist
+   travel-distance variables plus a staggered animation-delay for a flowing-
+   platoon look. --fdist defaults to the grid map's small-scale spur length;
+   the main intersection view overrides it (and the duration) to actually
+   cross the road, not just nudge in place. */
 @keyframes vehicle-flow {
   0% {
     transform: translate(0, 0);
     opacity: 1;
   }
-  65% {
+  70% {
     opacity: 1;
   }
   100% {
-    transform: translate(calc(var(--fx, 0) * 20px), calc(var(--fy, 0) * 20px));
+    transform: translate(calc(var(--fx, 0) * var(--fdist, 20px)), calc(var(--fy, 0) * var(--fdist, 20px)));
     opacity: 0;
   }
 }
 .vehicle-flowing {
-  animation: vehicle-flow 1.1s ease-in infinite;
+  animation: vehicle-flow var(--fdur, 1.1s) linear infinite;
 }

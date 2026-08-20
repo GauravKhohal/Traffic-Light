@@ -132,7 +132,7 @@ export default function IntersectionView({ signal }) {
         <h2 className="text-sm font-semibold text-slate-300">Intersection {id} — live</h2>
         <span className="text-xs text-slate-500">road · signal · queue · AI green plan</span>
       </div>
-      <svg viewBox={`0 0 ${size} ${size}`} className="w-full">
+      <svg viewBox={`0 0 ${size} ${size}`} className="w-full" style={{ overflow: 'hidden' }}>
         <defs>
           <pattern id={`hatch-${id}`} width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
             <line x1="0" y1="0" x2="0" y2="6" stroke="#94a3b8" strokeWidth="1" opacity="0.15" />
@@ -273,7 +273,17 @@ export default function IntersectionView({ signal }) {
                 <g
                   key={`${keyPrefix}-${i}`}
                   className={flowing ? 'vehicle-flowing' : ''}
-                  style={flowing ? { '--fx': spec.flow.x, '--fy': spec.flow.y, animationDelay: `${i * 160}ms` } : undefined}
+                  style={
+                    flowing
+                      ? {
+                          '--fx': spec.flow.x,
+                          '--fy': spec.flow.y,
+                          '--fdist': '340px',
+                          '--fdur': '2.4s',
+                          animationDelay: `${i * 200}ms`,
+                        }
+                      : undefined
+                  }
                 >
                   {wheels.map((wl, wi) => (
                     <rect key={wi} x={wl.x} y={wl.y} width={wl.rw} height={wl.rh} rx="1" fill="#0b1220" opacity="0.85" />
