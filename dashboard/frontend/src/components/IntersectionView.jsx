@@ -8,7 +8,14 @@ const MAX_SHOWN = 11 // cars drawn per approach even if the real queue is longer
 // single-colour block. Purely cosmetic, cycles by position in the queue.
 const CAR_COLORS = ['#f2cc3d', '#4ade80', '#60a5fa', '#f87171', '#c084fc', '#fb923c']
 
-const LANE_OFFSET_PX = 19 // lateral gap between the dedicated left lane and the through+right lane
+// Keep-left road geometry: each approach's own lanes sit offset toward its
+// own kerb (in its own leftPerp direction - see below), not centred on the
+// road's centreline. Opposing approaches share a road but use opposite
+// leftPerp directions, so their lanes land on opposite sides and never
+// overlap - e.g. S's northbound through traffic passes to the west of the
+// centreline while N's own (southbound) queue sits to the east of it.
+const THROUGH_LANE_OFFSET_PX = 14 // this approach's through+right lane, offset off the centreline
+const LEFT_LANE_GAP_PX = 18 // extra offset beyond that for the dedicated left lane, out toward the kerb
 const MAX_PER_TURN_LANE = 4 // left lane shown at most this many, through+right lane fills the rest
 
 function avg(a, b) {
@@ -122,7 +129,7 @@ export default function IntersectionView({ signal }) {
   const heldLefts = isGreenNow ? heldLeftApproaches(active) : new Set()
   const size = 520
   const c = size / 2
-  const roadHalf = 40 // half-width of each road surface (both directions)
+  const roadHalf = 46 // half-width of each road surface (both directions)
   const sidewalkW = 9 // width of the curb/sidewalk strip along each road edge
   const outerHalf = roadHalf + sidewalkW // half-width including sidewalks - marks where the city blocks start
 
@@ -213,7 +220,14 @@ export default function IntersectionView({ signal }) {
           const travel = { x: -dx, y: -dy }
           const leftPerp = { x: travel.y, y: -travel.x }
           const rightPerp = { x: -travel.y, y: travel.x }
-          const noPerp = { x: 0, y: 0 }
+          // both lane positions offset toward this approach's own kerb
+          // (leftPerp direction) so opposing traffic on the same road never
+          // shares a lane - see THROUGH_LANE_OFFSET_PX/LEFT_LANE_GAP_PX above
+          const throughPerp = { x: leftPerp.x * THROUGH_LANE_OFFSET_PX, y: leftPerp.y * THROUGH_LANE_OFFSET_PX }
+          const leftLanePerp = {
+            x: leftPerp.x * (THROUGH_LANE_OFFSET_PX + LEFT_LANE_GAP_PX),
+            y: leftPerp.y * (THROUGH_LANE_OFFSET_PX + LEFT_LANE_GAP_PX),
+          }
           const lanes = {
             L: { count: mv.L, flowing: !leftHeld, flow: avg(travel, leftPerp), ring: leftHeld ? '#ef4444' : '#22c55e' },
             S: { count: mv.S, flowing: isGreen, flow: travel, ring: null },
@@ -227,13 +241,14 @@ export default function IntersectionView({ signal }) {
           const w = vertical ? 20 : 30
           const h = vertical ? 30 : 20
 
-          // left lane cars get the lateral offset that puts them in their own
-          // lane; through+right cars share one file directly ahead of the
-          // stop line (perp 0,0), one behind another in arrival order
-          const leftSpecs = Array.from({ length: shownL }, () => ({ ...lanes.L, perp: leftPerp }))
+          // left lane cars sit out toward the kerb, in their own lane;
+          // through+right cars share one file closer to the centreline but
+          // still offset onto this approach's own side (throughPerp), one
+          // behind another in arrival order
+          const leftSpecs = Array.from({ length: shownL }, () => ({ ...lanes.L, perp: leftLanePerp }))
           const throughSpecs = [
-            ...Array.from({ length: shownS }, () => ({ ...lanes.S, perp: noPerp })),
-            ...Array.from({ length: shownR }, () => ({ ...lanes.R, perp: noPerp })),
+            ...Array.from({ length: shownS }, () => ({ ...lanes.S, perp: throughPerp })),
+            ...Array.from({ length: shownR }, () => ({ ...lanes.R, perp: throughPerp })),
           ]
 
           // queued / flowing cars, nose pointed at the stop line, one group
@@ -250,8 +265,8 @@ export default function IntersectionView({ signal }) {
           const renderLane = (specs, keyPrefix) =>
             specs.map((spec, i) => {
               const r = stopLineR + 12 + i * 18
-              const vx = c + dx * r + spec.perp.x * LANE_OFFSET_PX
-              const vy = c + dy * r + spec.perp.y * LANE_OFFSET_PX
+              const vx = c + dx * r + spec.perp.x
+              const vy = c + dy * r + spec.perp.y
               const flowing = spec.flowing
               const color = CAR_COLORS[colorCursor % CAR_COLORS.length]
               colorCursor += 1
@@ -315,7 +330,7 @@ export default function IntersectionView({ signal }) {
 
           // white dashed lane-boundary between the left lane and the
           // through+right lane, running the length of this arm
-          const boundaryOff = LANE_OFFSET_PX / 2
+          const boundaryOff = THROUGH_LANE_OFFSET_PX + LEFT_LANE_GAP_PX / 2
           const laneBoundary = {
             x1: c + dx * stopLineR + leftPerp.x * boundaryOff,
             y1: c + dy * stopLineR + leftPerp.y * boundaryOff,
